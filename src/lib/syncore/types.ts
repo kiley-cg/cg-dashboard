@@ -75,7 +75,19 @@ export const SyncoreLineItemSchema = z.object({
 });
 export type SyncoreLineItem = z.infer<typeof SyncoreLineItemSchema>;
 
-// Sales Order — response from GET /v2/orders/jobs/{job_id}/saleseorders/{id}.
+// Sales Order Status — allowed values per the Syncore V2 docs.
+// Note: no "Verified" state exists; v1 verification lives only in our DB.
+export const SyncoreSalesOrderStatusSchema = z.enum([
+  "Pending",
+  "Open",
+  "Invoiced",
+  "Paid",
+]);
+export type SyncoreSalesOrderStatus = z.infer<
+  typeof SyncoreSalesOrderStatusSchema
+>;
+
+// Sales Order — response from GET /v2/orders/jobs/{job_id}/salesorders.
 // line_items comes embedded inline per the docs response sample.
 export const SyncoreSalesOrderSchema = z
   .object({
@@ -83,7 +95,9 @@ export const SyncoreSalesOrderSchema = z
     number: z.number().optional(),
     job_number: z.number().optional(),
     date: z.string().optional(),
-    status: z.string().optional(),
+    // Accept both the documented enum and any future/unknown strings so a
+    // new status from Syncore never crashes us.
+    status: SyncoreSalesOrderStatusSchema.or(z.string()).optional(),
     client: SyncoreClientRefSchema.optional(),
     sold_to: SyncoreAddressSchema.optional(),
     bill_to: SyncoreAddressSchema.optional(),
@@ -95,6 +109,20 @@ export const SyncoreSalesOrderSchema = z
   })
   .passthrough();
 export type SyncoreSalesOrder = z.infer<typeof SyncoreSalesOrderSchema>;
+
+export const SyncoreSalesOrdersListSchema = z.object({
+  salesorders: z.array(SyncoreSalesOrderSchema),
+  total_results: z.number().optional(),
+  links: z
+    .object({
+      prev: z.string().optional(),
+      self: z.string().optional(),
+      next: z.string().optional(),
+    })
+    .partial()
+    .optional(),
+});
+export type SyncoreSalesOrdersList = z.infer<typeof SyncoreSalesOrdersListSchema>;
 
 // Summary shape for the list endpoint — same SO schema but line_items may be
 // missing. The passthrough above means the detail endpoint's extra fields

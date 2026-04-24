@@ -2,6 +2,7 @@ import { syncoreFetch } from "./client";
 import {
   SyncoreJobSchema,
   SyncoreLineItemSchema,
+  SyncoreSalesOrdersListSchema,
   SyncoreSalesOrderSchema,
   type FlatLineItem,
   type SyncoreJob,
@@ -10,13 +11,15 @@ import {
 } from "./types";
 import { z } from "zod";
 
-// Per docs.syncore.app, the sales-order URL segment is spelled "saleseorders"
-// verbatim. If that ever gets fixed upstream, this constant is the one place
-// to change.
-const SALES_ORDERS_SEGMENT = "saleseorders";
+// Syncore's spelling is inconsistent in their docs: the list endpoint uses
+// "salesorders" but the line-items path uses "saleseorders" with an extra
+// "e". Since line_items are embedded in the list response, we never need
+// the typo'd segment — but keeping it here documents the divergence.
+const SALES_ORDERS_LIST_SEGMENT = "salesorders";
+const SALES_ORDER_NESTED_SEGMENT = "saleseorders";
 
-// Paths are relative to SYNCORE_BASE_URL, which is https://api.syncore.app/v2
-// (version root). `/orders` is the Orders-API namespace under v2.
+// Paths are relative to SYNCORE_BASE_URL (https://api.syncore.app/v2).
+// `/orders` is the Orders API namespace under v2.
 
 export async function getJob(jobId: string | number): Promise<SyncoreJob> {
   const raw = await syncoreFetch<unknown>(
@@ -29,9 +32,9 @@ export async function listSalesOrders(
   jobId: string | number,
 ): Promise<SyncoreSalesOrder[]> {
   const raw = await syncoreFetch<unknown>(
-    `/orders/jobs/${encodeURIComponent(String(jobId))}/${SALES_ORDERS_SEGMENT}`,
+    `/orders/jobs/${encodeURIComponent(String(jobId))}/${SALES_ORDERS_LIST_SEGMENT}`,
   );
-  return z.array(SyncoreSalesOrderSchema).parse(raw);
+  return SyncoreSalesOrdersListSchema.parse(raw).salesorders;
 }
 
 export async function getSalesOrder(
@@ -40,7 +43,7 @@ export async function getSalesOrder(
 ): Promise<SyncoreSalesOrder> {
   const raw = await syncoreFetch<unknown>(
     `/orders/jobs/${encodeURIComponent(String(jobId))}` +
-      `/${SALES_ORDERS_SEGMENT}/${encodeURIComponent(String(salesOrderId))}`,
+      `/${SALES_ORDERS_LIST_SEGMENT}/${encodeURIComponent(String(salesOrderId))}`,
   );
   return SyncoreSalesOrderSchema.parse(raw);
 }
@@ -48,7 +51,7 @@ export async function getSalesOrder(
 /**
  * Per the docs, line items are also exposed at a separate endpoint — useful
  * if the list-sales-orders response comes back without them embedded. Not
- * used by getJobBundle right now.
+ * used by getJobBundle (line_items ship inline).
  */
 export async function listLineItems(
   jobId: string | number,
@@ -56,32 +59,24 @@ export async function listLineItems(
 ): Promise<SyncoreLineItem[]> {
   const raw = await syncoreFetch<unknown>(
     `/orders/jobs/${encodeURIComponent(String(jobId))}` +
-      `/${SALES_ORDERS_SEGMENT}/${encodeURIComponent(String(salesOrderId))}/lineitems`,
+      `/${SALES_ORDER_NESTED_SEGMENT}/${encodeURIComponent(String(salesOrderId))}/lineitems`,
   );
   return z.array(SyncoreLineItemSchema).parse(raw);
 }
 
 /**
  * Fetch a Job plus every Sales Order beneath it with full line items.
- * The list endpoint may or may not inline line_items; if it doesn't, we
- * hit the detail endpoint per SO to fill them in.
+ * The list endpoint embeds line_items inline, so one round-trip per level.
  */
 export async function getJobBundle(jobId: string | number): Promise<{
   job: SyncoreJob;
   salesOrders: SyncoreSalesOrder[];
 }> {
-  const [job, summaries] = await Promise.all([
+  const [job, salesOrders] = await Promise.all([
     getJob(jobId),
     listSalesOrders(jobId),
   ]);
-
-  const withItems = await Promise.all(
-    summaries.map(async (so) =>
-      so.line_items.length > 0 ? so : getSalesOrder(jobId, so.id),
-    ),
-  );
-
-  return { job, salesOrders: withItems };
+  return { job, salesOrders };
 }
 
 /**
