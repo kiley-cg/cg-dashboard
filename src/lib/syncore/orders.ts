@@ -15,9 +15,13 @@ import { z } from "zod";
 // to change.
 const SALES_ORDERS_SEGMENT = "saleseorders";
 
+// Paths are relative to SYNCORE_BASE_URL, which includes the `/v2/orders`
+// prefix (per Syncore's published base URL). So we just append `/jobs/...`
+// rather than `/v2/orders/jobs/...`.
+
 export async function getJob(jobId: string | number): Promise<SyncoreJob> {
   const raw = await syncoreFetch<unknown>(
-    `/v2/orders/jobs/${encodeURIComponent(String(jobId))}`,
+    `/jobs/${encodeURIComponent(String(jobId))}`,
   );
   return SyncoreJobSchema.parse(raw);
 }
@@ -26,7 +30,7 @@ export async function listSalesOrders(
   jobId: string | number,
 ): Promise<SyncoreSalesOrder[]> {
   const raw = await syncoreFetch<unknown>(
-    `/v2/orders/jobs/${encodeURIComponent(String(jobId))}/${SALES_ORDERS_SEGMENT}`,
+    `/jobs/${encodeURIComponent(String(jobId))}/${SALES_ORDERS_SEGMENT}`,
   );
   return z.array(SyncoreSalesOrderSchema).parse(raw);
 }
@@ -36,7 +40,7 @@ export async function getSalesOrder(
   salesOrderId: string | number,
 ): Promise<SyncoreSalesOrder> {
   const raw = await syncoreFetch<unknown>(
-    `/v2/orders/jobs/${encodeURIComponent(String(jobId))}` +
+    `/jobs/${encodeURIComponent(String(jobId))}` +
       `/${SALES_ORDERS_SEGMENT}/${encodeURIComponent(String(salesOrderId))}`,
   );
   return SyncoreSalesOrderSchema.parse(raw);
@@ -52,7 +56,7 @@ export async function listLineItems(
   salesOrderId: string | number,
 ): Promise<SyncoreLineItem[]> {
   const raw = await syncoreFetch<unknown>(
-    `/v2/orders/jobs/${encodeURIComponent(String(jobId))}` +
+    `/jobs/${encodeURIComponent(String(jobId))}` +
       `/${SALES_ORDERS_SEGMENT}/${encodeURIComponent(String(salesOrderId))}/lineitems`,
   );
   return z.array(SyncoreLineItemSchema).parse(raw);
