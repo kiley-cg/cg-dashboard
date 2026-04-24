@@ -72,7 +72,7 @@ export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
   return (
     <tr className="border-t border-cg-n-100">
       <td className="py-3 px-4 font-mono text-sm text-cg-n-900">
-        {line.productId}
+        {line.sku ?? line.productId}
       </td>
       <td className="py-3 px-4 text-sm text-cg-n-700">
         {line.color ?? "—"} / {line.size ?? "—"}

@@ -97,7 +97,7 @@ export default async function JobPage({ params }: Props) {
                 <table className="w-full text-left">
                   <thead className="bg-cg-n-50 border-b border-cg-n-200">
                     <tr className="text-cg-n-500 text-xs uppercase tracking-wider">
-                      <th className="py-3 px-4 font-semibold">Product</th>
+                      <th className="py-3 px-4 font-semibold">Style</th>
                       <th className="py-3 px-4 font-semibold">Color / Size</th>
                       <th className="py-3 px-4 text-right font-semibold">
                         Ordered

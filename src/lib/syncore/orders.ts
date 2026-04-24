@@ -114,16 +114,23 @@ export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
   for (const line of lines) {
     if (line.type !== "Size") continue;
     const { color, productHolder } = walkUp(line.parent_id);
-    if (!productHolder || productHolder.product_id == null) continue;
+    if (!productHolder) continue;
+
+    // Vendors (e.g. SanMar PromoStandards) key inventory by style number,
+    // which is the SKU on the parent line — not Syncore's internal
+    // product_id (which is often 0 when the rep typed the line manually).
+    const sku = line.sku ?? color?.sku ?? productHolder.sku ?? null;
+    const styleNumber = sku ?? (productHolder.product_id != null ? String(productHolder.product_id) : null);
+    if (!styleNumber) continue;
 
     flat.push({
       colorLineId: color?.line_id ?? productHolder.line_id,
       sizeLineId: line.line_id,
-      productId: String(productHolder.product_id),
+      productId: styleNumber,
       color: color?.description ?? null,
       size: line.description ?? null,
       qtyOrdered: line.quantity ?? 0,
-      sku: line.sku ?? color?.sku ?? productHolder.sku ?? null,
+      sku,
       supplierId:
         color?.supplier?.id ??
         productHolder.supplier?.id ??
