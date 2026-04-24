@@ -39,8 +39,11 @@ export const SyncoreSupplierRefSchema = z.object({
 });
 export type SyncoreSupplierRef = z.infer<typeof SyncoreSupplierRefSchema>;
 
+// Documented types per the Syncore docs, plus "Asi" which appears on lines
+// added via the ASI product-search flow (SKU + supplier live there).
 export const SyncoreLineItemTypeSchema = z.enum([
   "Comment",
+  "Asi",
   "Pricing",
   "Color",
   "Size",
