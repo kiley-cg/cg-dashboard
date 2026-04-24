@@ -81,66 +81,81 @@ export async function getJobBundle(jobId: string | number): Promise<{
 
 /**
  * Flatten the nested line-item tree into one FlatLineItem per stock-keeping
- * Size line. Per the Syncore docs, Size can be a child of Color OR of Comment
- * directly (for products without color variants). The product_id and supplier
- * come from the nearest ancestor that carries them — usually the Color line
- * when present, otherwise the Comment parent.
+ * Size line. Per the Syncore docs, Size can be a child of Color OR Comment.
+ * Walks the parent chain collecting:
+ *   - the nearest Color (for color description)
+ *   - the nearest ancestor SKU (style number for vendor lookups)
+ *   - the nearest ancestor supplier
+ *   - any non-zero ancestor product_id (last-resort fallback)
  */
 export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
   const byId = new Map<number, SyncoreLineItem>();
   for (const l of lines) byId.set(l.line_id, l);
 
-  function walkUp(
-    startId: number,
-  ): {
+  type WalkResult = {
     color: SyncoreLineItem | null;
-    productHolder: SyncoreLineItem | null;
-  } {
-    let color: SyncoreLineItem | null = null;
-    let productHolder: SyncoreLineItem | null = null;
+    sku: string | null;
+    supplierId: number | null;
+    supplierName: string | null;
+    fallbackProductId: number | null;
+  };
+
+  function walkUp(startId: number): WalkResult {
+    const out: WalkResult = {
+      color: null,
+      sku: null,
+      supplierId: null,
+      supplierName: null,
+      fallbackProductId: null,
+    };
     let cursor = byId.get(startId);
     const seen = new Set<number>();
     while (cursor && !seen.has(cursor.line_id)) {
       seen.add(cursor.line_id);
-      if (!color && cursor.type === "Color") color = cursor;
-      if (!productHolder && cursor.product_id != null) productHolder = cursor;
+      if (!out.color && cursor.type === "Color") out.color = cursor;
+      if (!out.sku && cursor.sku) out.sku = cursor.sku;
+      if (!out.supplierId && cursor.supplier?.id != null) {
+        out.supplierId = cursor.supplier.id;
+      }
+      if (!out.supplierName && cursor.supplier?.name) {
+        out.supplierName = cursor.supplier.name;
+      }
+      if (
+        out.fallbackProductId == null &&
+        cursor.product_id != null &&
+        cursor.product_id !== 0
+      ) {
+        out.fallbackProductId = cursor.product_id;
+      }
       if (!cursor.parent_id) break;
       cursor = byId.get(cursor.parent_id);
     }
-    return { color, productHolder };
+    return out;
   }
 
   const flat: FlatLineItem[] = [];
   for (const line of lines) {
     if (line.type !== "Size") continue;
-    const { color, productHolder } = walkUp(line.parent_id);
-    if (!productHolder) continue;
+    const ctx = walkUp(line.parent_id);
 
-    // Vendors (e.g. SanMar PromoStandards) key inventory by style number,
-    // which is the SKU on the parent line — not Syncore's internal
-    // product_id (which is often 0 when the rep typed the line manually).
-    const sku = line.sku ?? color?.sku ?? productHolder.sku ?? null;
-    const styleNumber = sku ?? (productHolder.product_id != null ? String(productHolder.product_id) : null);
+    // Vendor inventory (SanMar PromoStandards et al.) keys on style number
+    // (= SKU). Syncore's internal product_id is the last-resort fallback.
+    const sku = line.sku ?? ctx.sku ?? null;
+    const styleNumber =
+      sku ??
+      (ctx.fallbackProductId != null ? String(ctx.fallbackProductId) : null);
     if (!styleNumber) continue;
 
     flat.push({
-      colorLineId: color?.line_id ?? productHolder.line_id,
+      colorLineId: ctx.color?.line_id ?? line.parent_id,
       sizeLineId: line.line_id,
       productId: styleNumber,
-      color: color?.description ?? null,
+      color: ctx.color?.description ?? null,
       size: line.description ?? null,
       qtyOrdered: line.quantity ?? 0,
       sku,
-      supplierId:
-        color?.supplier?.id ??
-        productHolder.supplier?.id ??
-        line.supplier?.id ??
-        null,
-      supplierName:
-        color?.supplier?.name ??
-        productHolder.supplier?.name ??
-        line.supplier?.name ??
-        null,
+      supplierId: line.supplier?.id ?? ctx.supplierId,
+      supplierName: line.supplier?.name ?? ctx.supplierName,
     });
   }
   return flat;
