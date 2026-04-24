@@ -66,34 +66,57 @@ export async function getJobBundle(jobId: string | number): Promise<{
 }
 
 /**
- * Flatten the Color → Size hierarchy into one FlatLineItem per stock-keeping
- * size line. Color parent carries the product_id; Size children carry the
- * quantities. Other line-item types (Comment, Decoration*, etc.) are ignored
- * for inventory purposes.
+ * Flatten the nested line-item tree into one FlatLineItem per stock-keeping
+ * Size line. Per the Syncore docs, Size can be a child of Color OR of Comment
+ * directly (for products without color variants). The product_id and
+ * supplier come from the nearest ancestor that carries them — usually the
+ * Color line when present, otherwise the Comment parent.
  */
 export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
   const byId = new Map<number, SyncoreLineItem>();
   for (const l of lines) byId.set(l.line_id, l);
 
+  function walkUp(
+    startId: number,
+  ): {
+    color: SyncoreLineItem | null;
+    productHolder: SyncoreLineItem | null;
+  } {
+    let color: SyncoreLineItem | null = null;
+    let productHolder: SyncoreLineItem | null = null;
+    let cursor = byId.get(startId);
+    const seen = new Set<number>();
+    while (cursor && !seen.has(cursor.line_id)) {
+      seen.add(cursor.line_id);
+      if (!color && cursor.type === "Color") color = cursor;
+      if (!productHolder && cursor.product_id != null) productHolder = cursor;
+      if (!cursor.parent_id) break;
+      cursor = byId.get(cursor.parent_id);
+    }
+    return { color, productHolder };
+  }
+
   const flat: FlatLineItem[] = [];
   for (const line of lines) {
     if (line.type !== "Size") continue;
-    const parent = byId.get(line.parent_id);
-    if (!parent || parent.type !== "Color") continue;
-
-    const productId = parent.product_id;
-    if (productId == null) continue;
+    const { color, productHolder } = walkUp(line.parent_id);
+    if (!productHolder || productHolder.product_id == null) continue;
 
     flat.push({
-      colorLineId: parent.line_id,
+      colorLineId: color?.line_id ?? productHolder.line_id,
       sizeLineId: line.line_id,
-      productId: String(productId),
-      color: parent.description ?? null,
+      productId: String(productHolder.product_id),
+      color: color?.description ?? null,
       size: line.description ?? null,
       qtyOrdered: line.quantity ?? 0,
-      sku: line.sku ?? parent.sku ?? null,
-      supplierId: parent.supplier?.id ?? line.supplier?.id ?? null,
-      supplierName: parent.supplier?.name ?? line.supplier?.name ?? null,
+      sku: line.sku ?? color?.sku ?? productHolder.sku ?? null,
+      supplierId:
+        color?.supplier?.id ?? productHolder.supplier?.id ?? line.supplier?.id ?? null,
+      supplierName:
+        color?.supplier?.name ??
+        productHolder.supplier?.name ??
+        line.supplier?.name ??
+        null,
     });
   }
   return flat;
