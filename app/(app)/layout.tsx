@@ -11,15 +11,18 @@ export default async function AppLayout({
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b border-cg-border">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+      <header className="bg-cg-black text-white">
+        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3">
-            <Logo size={36} />
-            <span className="font-semibold tracking-wide">Inventory Check</span>
+            <Logo size={32} />
+            <span className="font-extrabold tracking-wide uppercase text-sm">
+              Color Graphics
+            </span>
+            <span className="ml-2 text-cg-n-300 text-sm">· Inventory Check</span>
           </Link>
           <div className="flex items-center gap-4 text-sm">
             {session?.user?.email && (
-              <span className="text-cg-muted">{session.user.email}</span>
+              <span className="text-cg-n-300">{session.user.email}</span>
             )}
             <form
               action={async () => {
@@ -29,7 +32,7 @@ export default async function AppLayout({
             >
               <button
                 type="submit"
-                className="text-cg-muted hover:text-cg-text transition"
+                className="text-cg-n-300 hover:text-white transition"
               >
                 Sign out
               </button>

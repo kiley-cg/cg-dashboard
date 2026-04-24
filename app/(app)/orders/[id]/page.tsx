@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getOrder } from "@/lib/syncore/orders";
 import { lookupInventory } from "@/lib/vendors/registry";
 import { LineItemRow } from "@/components/LineItemRow";
+import { Badge } from "@/components/Badge";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -15,12 +16,17 @@ export default async function OrderPage({ params }: Props) {
     order = await getOrder(id);
   } catch (err) {
     return (
-      <section className="max-w-5xl mx-auto px-6 py-16">
-        <Link href="/" className="text-cg-muted hover:text-cg-text text-sm">
+      <section className="max-w-6xl mx-auto px-6 py-16">
+        <Link
+          href="/"
+          className="text-cg-n-500 hover:text-cg-n-900 text-sm"
+        >
           ← Back
         </Link>
-        <h1 className="text-2xl font-bold mt-4">Order {id}</h1>
-        <p className="text-cg-red mt-4">
+        <h1 className="text-2xl font-extrabold tracking-tight mt-4">
+          Order {id}
+        </h1>
+        <p className="text-cg-danger mt-4">
           Could not load order:{" "}
           {err instanceof Error ? err.message : "unknown error"}
         </p>
@@ -33,41 +39,45 @@ export default async function OrderPage({ params }: Props) {
   );
 
   return (
-    <section className="max-w-5xl mx-auto px-6 py-10">
-      <Link href="/" className="text-cg-muted hover:text-cg-text text-sm">
+    <section className="max-w-6xl mx-auto px-6 py-10">
+      <Link
+        href="/"
+        className="text-cg-n-500 hover:text-cg-n-900 text-sm"
+      >
         ← Back
       </Link>
       <div className="flex items-baseline justify-between mt-4 mb-8">
         <div>
-          <h1 className="text-2xl font-bold">Order {order.orderNumber}</h1>
+          <p className="text-cg-red text-xs font-semibold uppercase tracking-wider">
+            Order
+          </p>
+          <h1 className="text-3xl font-extrabold tracking-tight mt-1">
+            {order.orderNumber}
+          </h1>
           {order.customerName && (
-            <p className="text-cg-muted mt-1">{order.customerName}</p>
+            <p className="text-cg-n-600 mt-1">{order.customerName}</p>
           )}
         </div>
-        {order.status && (
-          <span className="text-cg-muted text-sm uppercase tracking-wide">
-            {order.status}
-          </span>
-        )}
+        {order.status && <Badge tone="neutral">{order.status}</Badge>}
       </div>
 
-      <div className="bg-cg-surface border border-cg-border rounded-card overflow-hidden">
+      <div className="bg-white border border-cg-n-200 rounded-card overflow-hidden shadow-sm">
         <table className="w-full text-left">
-          <thead className="bg-cg-bg">
-            <tr className="text-cg-muted text-xs uppercase tracking-wider">
-              <th className="py-3 px-4">Product</th>
-              <th className="py-3 px-4">Color / Size</th>
-              <th className="py-3 px-4 text-right">Ordered</th>
-              <th className="py-3 px-4 text-right">Available</th>
-              <th className="py-3 px-4 text-right"></th>
+          <thead className="bg-cg-n-50 border-b border-cg-n-200">
+            <tr className="text-cg-n-500 text-xs uppercase tracking-wider">
+              <th className="py-3 px-4 font-semibold">Product</th>
+              <th className="py-3 px-4 font-semibold">Color / Size</th>
+              <th className="py-3 px-4 text-right font-semibold">Ordered</th>
+              <th className="py-3 px-4 text-right font-semibold">Available</th>
+              <th className="py-3 px-4 text-right font-semibold"></th>
             </tr>
           </thead>
-          <tbody className="px-4">
+          <tbody>
             {order.lines.length === 0 && (
               <tr>
                 <td
                   colSpan={5}
-                  className="py-8 px-4 text-center text-cg-muted text-sm"
+                  className="py-8 px-4 text-center text-cg-n-500 text-sm"
                 >
                   No line items on this order.
                 </td>

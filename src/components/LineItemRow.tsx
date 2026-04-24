@@ -3,6 +3,8 @@
 import { useState } from "react";
 import type { SyncoreLineItem } from "@/lib/syncore/types";
 import type { InventoryLookup } from "@/lib/vendors/types";
+import { Badge } from "./Badge";
+import { Button } from "./Button";
 
 type Props = {
   orderId: string;
@@ -22,7 +24,6 @@ function matchingAvailable(
       (!size || l.size?.toLowerCase() === size.toLowerCase()),
   );
   if (exact) return exact.quantityAvailable;
-  // Fall back to sum across all parts if no exact match was returned.
   return lookup.lines.reduce((n, l) => n + l.quantityAvailable, 0);
 }
 
@@ -65,37 +66,41 @@ export function LineItemRow({ orderId, line, lookup }: Props) {
   }
 
   return (
-    <tr className="border-t border-cg-border">
-      <td className="py-3 pr-4 font-mono text-sm">{line.productId}</td>
-      <td className="py-3 pr-4 text-sm">
+    <tr className="border-t border-cg-n-100">
+      <td className="py-3 px-4 font-mono text-sm text-cg-n-900">
+        {line.productId}
+      </td>
+      <td className="py-3 px-4 text-sm text-cg-n-700">
         {line.color ?? "—"} / {line.size ?? "—"}
       </td>
-      <td className="py-3 pr-4 text-right">{line.qtyOrdered}</td>
-      <td className="py-3 pr-4 text-right">
+      <td className="py-3 px-4 text-right tabular-nums">{line.qtyOrdered}</td>
+      <td className="py-3 px-4 text-right">
         {lookup.status === "ok" ? (
-          <span className={sufficient ? "" : "text-cg-red"}>
+          <span
+            className={`tabular-nums ${sufficient ? "text-cg-n-900" : "text-cg-danger font-semibold"}`}
+          >
             {available ?? 0}
           </span>
         ) : lookup.status === "vendor-error" ? (
-          <span className="text-cg-red text-xs">vendor error</span>
+          <Badge tone="danger">Vendor error</Badge>
         ) : (
-          <span className="text-cg-muted text-xs">unsupported</span>
+          <Badge tone="neutral">Unsupported</Badge>
         )}
       </td>
-      <td className="py-3 text-right">
+      <td className="py-3 px-4 text-right">
         {state.kind === "ok" ? (
-          <span className="text-green-400 text-sm">Verified ✓</span>
+          <Badge tone="success">Verified</Badge>
         ) : (
-          <button
+          <Button
             onClick={onVerify}
             disabled={!canVerify || state.kind === "saving"}
-            className="bg-cg-red disabled:bg-cg-border disabled:text-cg-muted text-white text-sm font-semibold px-3 py-1.5 rounded-card transition hover:brightness-110"
+            size="sm"
           >
             {state.kind === "saving" ? "Saving…" : "Verify"}
-          </button>
+          </Button>
         )}
         {state.kind === "error" && (
-          <p className="text-cg-red text-xs mt-1">{state.message}</p>
+          <p className="text-cg-danger text-xs mt-1">{state.message}</p>
         )}
       </td>
     </tr>
