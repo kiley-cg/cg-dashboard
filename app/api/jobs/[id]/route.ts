@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getOrder } from "@/lib/syncore/orders";
+import { getJobBundle, flattenLines } from "@/lib/syncore/orders";
 import { lookupInventory } from "@/lib/vendors/registry";
 
 export async function GET(
@@ -14,11 +14,18 @@ export async function GET(
 
   const { id } = await params;
   try {
-    const order = await getOrder(id);
-    const lookups = await Promise.all(
-      order.lines.map((l) => lookupInventory(l)),
+    const { job, salesOrders } = await getJobBundle(id);
+    const withInventory = await Promise.all(
+      salesOrders.map(async ({ salesOrder, lineItems }) => {
+        const flat = flattenLines(lineItems);
+        const lookups = await Promise.all(flat.map((l) => lookupInventory(l)));
+        return {
+          salesOrder,
+          lines: flat.map((line, i) => ({ line, lookup: lookups[i] })),
+        };
+      }),
     );
-    return NextResponse.json({ order, lookups });
+    return NextResponse.json({ job, salesOrders: withInventory });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "failed" },

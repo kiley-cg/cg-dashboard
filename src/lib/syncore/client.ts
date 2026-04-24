@@ -1,3 +1,6 @@
+// Syncore V2 REST client.
+// Auth: x-api-key header (per docs.syncore.app).
+
 export class SyncoreError extends Error {
   constructor(
     message: string,
@@ -35,9 +38,7 @@ export async function syncoreFetch<T = unknown>(
 
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
-  // Header name is provisional; Syncore's docs confirm a static key auth scheme.
-  // Centralize here so swapping to Authorization: Bearer is one edit.
-  headers.set("X-API-Key", env("SYNCORE_API_KEY"));
+  headers.set("x-api-key", env("SYNCORE_API_KEY"));
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
@@ -46,7 +47,6 @@ export async function syncoreFetch<T = unknown>(
     ...init,
     headers,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    // Always live — never cache order data.
     cache: "no-store",
   });
 

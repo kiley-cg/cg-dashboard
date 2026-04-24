@@ -1,19 +1,22 @@
-import type { SyncoreLineItem } from "../syncore/types";
+import type { FlatLineItem } from "../syncore/types";
 import { getInventoryLevels } from "./sanmar/client";
 import { mapSanMarInventory } from "./sanmar/map";
 import type { InventoryLookup, VendorCode } from "./types";
 
-function resolveVendor(line: SyncoreLineItem): VendorCode {
-  const code = line.vendorCode?.toLowerCase().trim();
-  if (!code) return "sanmar"; // v1 default; swap once we add vendor #2
-  if (code === "sanmar" || code === "sm") return "sanmar";
-  return "unknown";
+// SanMar is supplier_id 65 in our Syncore tenant (and more broadly, ASI 84863).
+// Until Color Graphics has multiple vendor adapters, resolveVendor falls back
+// to SanMar when the supplier doesn't match anything explicit.
+function resolveVendor(supplierName: string | null): VendorCode {
+  const name = supplierName?.toLowerCase().trim() ?? "";
+  if (name.includes("sanmar")) return "sanmar";
+  // v1 default — revisit when we add a second adapter.
+  return "sanmar";
 }
 
 export async function lookupInventory(
-  line: SyncoreLineItem,
+  line: FlatLineItem,
 ): Promise<InventoryLookup> {
-  const vendor = resolveVendor(line);
+  const vendor = resolveVendor(line.supplierName);
   const productId = line.productId;
 
   if (vendor === "unknown") {
@@ -21,7 +24,7 @@ export async function lookupInventory(
       status: "unsupported",
       vendor,
       productId,
-      message: `Vendor code "${line.vendorCode}" has no adapter yet.`,
+      message: `Supplier "${line.supplierName ?? "unknown"}" has no adapter yet.`,
     };
   }
 

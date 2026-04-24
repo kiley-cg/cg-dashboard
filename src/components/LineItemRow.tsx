@@ -1,21 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import type { SyncoreLineItem } from "@/lib/syncore/types";
+import type { FlatLineItem } from "@/lib/syncore/types";
 import type { InventoryLookup } from "@/lib/vendors/types";
 import { Badge } from "./Badge";
 import { Button } from "./Button";
 
 type Props = {
-  orderId: string;
-  line: SyncoreLineItem;
+  jobId: string;
+  salesOrderId: number;
+  line: FlatLineItem;
   lookup: InventoryLookup;
 };
 
 function matchingAvailable(
   lookup: InventoryLookup,
-  color: string | null | undefined,
-  size: string | null | undefined,
+  color: string | null,
+  size: string | null,
 ): number | null {
   if (lookup.status !== "ok") return null;
   const exact = lookup.lines.find(
@@ -27,7 +28,7 @@ function matchingAvailable(
   return lookup.lines.reduce((n, l) => n + l.quantityAvailable, 0);
 }
 
-export function LineItemRow({ orderId, line, lookup }: Props) {
+export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
   const [state, setState] = useState<
     | { kind: "idle" }
     | { kind: "saving" }
@@ -43,12 +44,15 @@ export function LineItemRow({ orderId, line, lookup }: Props) {
     if (!canVerify || available === null) return;
     setState({ kind: "saving" });
     const res = await fetch(
-      `/api/orders/${encodeURIComponent(orderId)}/verify`,
+      `/api/jobs/${encodeURIComponent(jobId)}/verify`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lineId: line.id,
+          salesOrderId,
+          sizeLineId: line.sizeLineId,
+          colorLineId: line.colorLineId,
+          productId: line.productId,
           qtyConfirmed: line.qtyOrdered,
           snapshot: lookup,
         }),
