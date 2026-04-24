@@ -144,10 +144,13 @@ export const SyncoreJobSchema = z
 export type SyncoreJob = z.infer<typeof SyncoreJobSchema>;
 
 // Denormalized row for inventory lookup — one per (product, color, size, qty).
+// productId (style number) may be null when the source line has no SKU and
+// only a placeholder product_id of 0; we still surface the row so the rep
+// can see what's on the order, but skip the vendor call.
 export type FlatLineItem = {
   colorLineId: number;
   sizeLineId: number;
-  productId: string;
+  productId: string | null;
   color: string | null;
   size: string | null;
   qtyOrdered: number;

@@ -19,6 +19,15 @@ export async function lookupInventory(
   const vendor = resolveVendor(line.supplierName);
   const productId = line.productId;
 
+  if (!productId) {
+    return {
+      status: "no-style",
+      vendor,
+      productId: null,
+      message: "Line has no SKU/style number — add it in Syncore.",
+    };
+  }
+
   if (vendor === "unknown") {
     return {
       status: "unsupported",

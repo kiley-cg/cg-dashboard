@@ -72,7 +72,7 @@ export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
   return (
     <tr className="border-t border-cg-n-100">
       <td className="py-3 px-4 font-mono text-sm text-cg-n-900">
-        {line.sku ?? line.productId}
+        {line.sku ?? line.productId ?? <span className="text-cg-n-400">—</span>}
       </td>
       <td className="py-3 px-4 text-sm text-cg-n-700">
         {line.color ?? "—"} / {line.size ?? "—"}
@@ -87,6 +87,8 @@ export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
           </span>
         ) : lookup.status === "vendor-error" ? (
           <Badge tone="danger">Vendor error</Badge>
+        ) : lookup.status === "no-style" ? (
+          <Badge tone="neutral">No SKU</Badge>
         ) : (
           <Badge tone="neutral">Unsupported</Badge>
         )}

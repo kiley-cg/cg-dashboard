@@ -138,18 +138,16 @@ export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
     if (line.type !== "Size") continue;
     const ctx = walkUp(line.parent_id);
 
-    // Vendor inventory (SanMar PromoStandards et al.) keys on style number
-    // (= SKU). Syncore's internal product_id is the last-resort fallback.
+    // SanMar PromoStandards keys on style number (= SKU). Syncore's
+    // product_id is internal-only and useless to vendors. styleNumber may
+    // be null if the rep typed the line without going through ASI/TSC
+    // search — we still emit the row so they can see what's there.
     const sku = line.sku ?? ctx.sku ?? null;
-    const styleNumber =
-      sku ??
-      (ctx.fallbackProductId != null ? String(ctx.fallbackProductId) : null);
-    if (!styleNumber) continue;
 
     flat.push({
       colorLineId: ctx.color?.line_id ?? line.parent_id,
       sizeLineId: line.line_id,
-      productId: styleNumber,
+      productId: sku, // style number for vendor lookup; null when unavailable
       color: ctx.color?.description ?? null,
       size: line.description ?? null,
       qtyOrdered: line.quantity ?? 0,

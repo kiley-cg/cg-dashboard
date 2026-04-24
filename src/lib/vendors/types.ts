@@ -20,9 +20,9 @@ export type InventoryLookupOk = {
 };
 
 export type InventoryLookupError = {
-  status: "vendor-error" | "unsupported";
+  status: "vendor-error" | "unsupported" | "no-style";
   vendor: VendorCode;
-  productId: string;
+  productId: string | null;
   message: string;
 };
 
