@@ -50,11 +50,16 @@ export async function lookupInventory(
       lines: mapSanMarInventory(raw),
     };
   } catch (err) {
-    return {
-      status: "vendor-error",
-      vendor,
-      productId,
-      message: err instanceof Error ? err.message : String(err),
-    };
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[inventory] ${vendor} lookup failed for productId=${productId}`,
+      {
+        message,
+        color: line.color,
+        size: line.size,
+        stack: err instanceof Error ? err.stack : undefined,
+      },
+    );
+    return { status: "vendor-error", vendor, productId, message };
   }
 }

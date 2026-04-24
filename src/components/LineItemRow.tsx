@@ -88,7 +88,9 @@ export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
             {available ?? 0}
           </span>
         ) : lookup.status === "vendor-error" ? (
-          <Badge tone="danger">Vendor error</Badge>
+          <span title={lookup.message} className="cursor-help">
+            <Badge tone="danger">Vendor error</Badge>
+          </span>
         ) : lookup.status === "no-style" ? (
           <Badge tone="neutral">No SKU</Badge>
         ) : (
