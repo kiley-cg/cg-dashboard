@@ -2,7 +2,31 @@ import { z } from "zod";
 
 // Syncore V2 API types.
 // Source of truth: https://docs.syncore.app/docs/syncore/
-// Structure: Job → Sales Orders → Line Items (nested Color/Size hierarchy).
+// Structure: Job → Sales Orders (line_items embedded inline per response sample).
+
+export const SyncoreAddressSchema = z
+  .object({
+    business_name: z.string().nullish(),
+    name: z.string().nullish(),
+    address1: z.string().nullish(),
+    address2: z.string().nullish(),
+    city: z.string().nullish(),
+    state: z.string().nullish(),
+    zip: z.string().nullish(),
+    country: z.string().nullish(),
+  })
+  .partial();
+export type SyncoreAddress = z.infer<typeof SyncoreAddressSchema>;
+
+export const SyncoreClientRefSchema = z
+  .object({
+    id: z.number(),
+    business_name: z.string().optional(),
+    name: z.string().optional(),
+    email: z.string().optional(),
+  })
+  .partial({ business_name: true, name: true, email: true });
+export type SyncoreClientRef = z.infer<typeof SyncoreClientRefSchema>;
 
 export const SyncoreSupplierRefSchema = z.object({
   id: z.number(),
@@ -13,7 +37,6 @@ export const SyncoreSupplierRefSchema = z.object({
 });
 export type SyncoreSupplierRef = z.infer<typeof SyncoreSupplierRefSchema>;
 
-// All recognized line item types per the docs.
 export const SyncoreLineItemTypeSchema = z.enum([
   "Comment",
   "Pricing",
@@ -47,60 +70,58 @@ export const SyncoreLineItemSchema = z.object({
   line_total_value: z.number().optional(),
   supplier: SyncoreSupplierRefSchema.optional(),
   type: SyncoreLineItemTypeSchema.or(z.string()),
-  // "visible" in the docs appears both as boolean and (incorrectly) as a
-  // string literal; accept either.
   visible: z.union([z.boolean(), z.string()]).optional(),
   from_stock: z.boolean().optional(),
 });
 export type SyncoreLineItem = z.infer<typeof SyncoreLineItemSchema>;
 
-export const SyncoreSalesOrderSchema = z.object({
-  id: z.number(),
-  status: z.string().optional(),
-  description: z.string().optional(),
-  // Docs page for Sales Orders to be pasted — this schema is intentionally
-  // permissive until we see a real response. z.passthrough keeps unknown
-  // fields so we don't lose data.
-}).passthrough();
+// Sales Order — response from GET /v2/orders/jobs/{job_id}/saleseorders/{id}.
+// line_items comes embedded inline per the docs response sample.
+export const SyncoreSalesOrderSchema = z
+  .object({
+    id: z.number(),
+    number: z.number().optional(),
+    job_number: z.number().optional(),
+    date: z.string().optional(),
+    status: z.string().optional(),
+    client: SyncoreClientRefSchema.optional(),
+    sold_to: SyncoreAddressSchema.optional(),
+    bill_to: SyncoreAddressSchema.optional(),
+    ship_to: SyncoreAddressSchema.optional(),
+    line_items: z.array(SyncoreLineItemSchema).default([]),
+    customer_order_number: z.string().nullish(),
+    customer_instructions: z.string().nullish(),
+    description: z.string().optional(),
+  })
+  .passthrough();
 export type SyncoreSalesOrder = z.infer<typeof SyncoreSalesOrderSchema>;
 
-export const SyncoreJobStatusSchema = z.enum([
-  "Pending",
-  "Submitted",
-  "WIP",
-  "Delivered",
-  "Completed",
-]);
-export type SyncoreJobStatus = z.infer<typeof SyncoreJobStatusSchema>;
+// Summary shape for the list endpoint — same SO schema but line_items may be
+// missing. The passthrough above means the detail endpoint's extra fields
+// (totals, payments, etc.) pass through without schema noise.
 
-export const SyncoreJobSchema = z.object({
-  id: z.number(),
-  store: z
-    .object({ id: z.number(), name: z.string().optional() })
-    .optional(),
-  job_class: z.string().optional(),
-  status: z.string().optional(),
-  date: z.string().optional(),
-  estimated_delivery_date: z.string().nullish(),
-  description: z.string().optional(),
-  job_type: z.string().optional(),
-  priority: z.string().optional(),
-  product_index: z
-    .object({ id: z.number(), name: z.string().optional() })
-    .optional(),
-  client: z
-    .object({
-      id: z.number(),
-      business_name: z.string().optional(),
-      name: z.string().optional(),
-      email: z.string().optional(),
-    })
-    .optional(),
-}).passthrough();
+export const SyncoreJobSchema = z
+  .object({
+    id: z.number(),
+    store: z
+      .object({ id: z.number(), name: z.string().optional() })
+      .optional(),
+    job_class: z.string().optional(),
+    status: z.string().optional(),
+    date: z.string().optional(),
+    estimated_delivery_date: z.string().nullish(),
+    description: z.string().optional(),
+    job_type: z.string().optional(),
+    priority: z.string().optional(),
+    product_index: z
+      .object({ id: z.number(), name: z.string().optional() })
+      .optional(),
+    client: SyncoreClientRefSchema.optional(),
+  })
+  .passthrough();
 export type SyncoreJob = z.infer<typeof SyncoreJobSchema>;
 
 // Denormalized row for inventory lookup — one per (product, color, size, qty).
-// Produced by flattening the Color→Size line-item hierarchy.
 export type FlatLineItem = {
   colorLineId: number;
   sizeLineId: number;

@@ -68,15 +68,15 @@ export default async function JobPage({ params }: Props) {
         )}
 
         {await Promise.all(
-          salesOrders.map(async ({ salesOrder, lineItems }) => {
-            const flat = flattenLines(lineItems);
+          salesOrders.map(async (so) => {
+            const flat = flattenLines(so.line_items);
             const lookups = await Promise.all(
               flat.map((line) => lookupInventory(line)),
             );
 
             return (
               <div
-                key={salesOrder.id}
+                key={so.id}
                 className="bg-white border border-cg-n-200 rounded-card overflow-hidden shadow-sm"
               >
                 <div className="px-5 py-3 border-b border-cg-n-100 flex items-baseline justify-between">
@@ -85,24 +85,20 @@ export default async function JobPage({ params }: Props) {
                       Sales Order
                     </p>
                     <p className="font-bold tracking-tight">
-                      #{salesOrder.id}
-                      {salesOrder.description
-                        ? ` · ${salesOrder.description}`
+                      #{so.number ?? so.id}
+                      {so.customer_order_number
+                        ? ` · PO ${so.customer_order_number}`
                         : ""}
                     </p>
                   </div>
-                  {salesOrder.status && (
-                    <Badge tone="neutral">{salesOrder.status}</Badge>
-                  )}
+                  {so.status && <Badge tone="neutral">{so.status}</Badge>}
                 </div>
 
                 <table className="w-full text-left">
                   <thead className="bg-cg-n-50 border-b border-cg-n-200">
                     <tr className="text-cg-n-500 text-xs uppercase tracking-wider">
                       <th className="py-3 px-4 font-semibold">Product</th>
-                      <th className="py-3 px-4 font-semibold">
-                        Color / Size
-                      </th>
+                      <th className="py-3 px-4 font-semibold">Color / Size</th>
                       <th className="py-3 px-4 text-right font-semibold">
                         Ordered
                       </th>
@@ -128,7 +124,7 @@ export default async function JobPage({ params }: Props) {
                       <LineItemRow
                         key={line.sizeLineId}
                         jobId={id}
-                        salesOrderId={salesOrder.id}
+                        salesOrderId={so.id}
                         line={line}
                         lookup={lookups[i]}
                       />

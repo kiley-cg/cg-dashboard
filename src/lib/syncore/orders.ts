@@ -10,9 +10,9 @@ import {
 } from "./types";
 import { z } from "zod";
 
-// Per docs: nested line items live under the "saleseorders" segment
-// (spelling copied verbatim from the Syncore V2 docs — if that's an
-// upstream typo they later fix, this one constant is the fix.)
+// Per docs.syncore.app, the sales-order URL segment is spelled "saleseorders"
+// verbatim. If that ever gets fixed upstream, this constant is the one place
+// to change.
 const SALES_ORDERS_SEGMENT = "saleseorders";
 
 export async function getJob(jobId: string | number): Promise<SyncoreJob> {
@@ -25,14 +25,28 @@ export async function getJob(jobId: string | number): Promise<SyncoreJob> {
 export async function listSalesOrders(
   jobId: string | number,
 ): Promise<SyncoreSalesOrder[]> {
-  // Endpoint path provisional until the Sales Orders docs page is confirmed.
-  // Once confirmed, this is the one place to adjust.
   const raw = await syncoreFetch<unknown>(
     `/v2/orders/jobs/${encodeURIComponent(String(jobId))}/${SALES_ORDERS_SEGMENT}`,
   );
   return z.array(SyncoreSalesOrderSchema).parse(raw);
 }
 
+export async function getSalesOrder(
+  jobId: string | number,
+  salesOrderId: string | number,
+): Promise<SyncoreSalesOrder> {
+  const raw = await syncoreFetch<unknown>(
+    `/v2/orders/jobs/${encodeURIComponent(String(jobId))}` +
+      `/${SALES_ORDERS_SEGMENT}/${encodeURIComponent(String(salesOrderId))}`,
+  );
+  return SyncoreSalesOrderSchema.parse(raw);
+}
+
+/**
+ * Per the docs, line items are also exposed at a separate endpoint — useful
+ * if the list-sales-orders response comes back without them embedded. Not
+ * used by getJobBundle right now.
+ */
 export async function listLineItems(
   jobId: string | number,
   salesOrderId: string | number,
@@ -45,32 +59,34 @@ export async function listLineItems(
 }
 
 /**
- * Composite fetch for the rep view: job + all sales orders + all line items.
+ * Fetch a Job plus every Sales Order beneath it with full line items.
+ * The list endpoint may or may not inline line_items; if it doesn't, we
+ * hit the detail endpoint per SO to fill them in.
  */
 export async function getJobBundle(jobId: string | number): Promise<{
   job: SyncoreJob;
-  salesOrders: Array<{
-    salesOrder: SyncoreSalesOrder;
-    lineItems: SyncoreLineItem[];
-  }>;
+  salesOrders: SyncoreSalesOrder[];
 }> {
-  const job = await getJob(jobId);
-  const salesOrders = await listSalesOrders(jobId);
+  const [job, summaries] = await Promise.all([
+    getJob(jobId),
+    listSalesOrders(jobId),
+  ]);
+
   const withItems = await Promise.all(
-    salesOrders.map(async (so) => ({
-      salesOrder: so,
-      lineItems: await listLineItems(jobId, so.id),
-    })),
+    summaries.map(async (so) =>
+      so.line_items.length > 0 ? so : getSalesOrder(jobId, so.id),
+    ),
   );
+
   return { job, salesOrders: withItems };
 }
 
 /**
  * Flatten the nested line-item tree into one FlatLineItem per stock-keeping
  * Size line. Per the Syncore docs, Size can be a child of Color OR of Comment
- * directly (for products without color variants). The product_id and
- * supplier come from the nearest ancestor that carries them — usually the
- * Color line when present, otherwise the Comment parent.
+ * directly (for products without color variants). The product_id and supplier
+ * come from the nearest ancestor that carries them — usually the Color line
+ * when present, otherwise the Comment parent.
  */
 export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
   const byId = new Map<number, SyncoreLineItem>();
@@ -111,7 +127,10 @@ export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
       qtyOrdered: line.quantity ?? 0,
       sku: line.sku ?? color?.sku ?? productHolder.sku ?? null,
       supplierId:
-        color?.supplier?.id ?? productHolder.supplier?.id ?? line.supplier?.id ?? null,
+        color?.supplier?.id ??
+        productHolder.supplier?.id ??
+        line.supplier?.id ??
+        null,
       supplierName:
         color?.supplier?.name ??
         productHolder.supplier?.name ??

@@ -16,11 +16,11 @@ export async function GET(
   try {
     const { job, salesOrders } = await getJobBundle(id);
     const withInventory = await Promise.all(
-      salesOrders.map(async ({ salesOrder, lineItems }) => {
-        const flat = flattenLines(lineItems);
+      salesOrders.map(async (so) => {
+        const flat = flattenLines(so.line_items);
         const lookups = await Promise.all(flat.map((l) => lookupInventory(l)));
         return {
-          salesOrder,
+          salesOrder: so,
           lines: flat.map((line, i) => ({ line, lookup: lookups[i] })),
         };
       }),
