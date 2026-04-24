@@ -142,7 +142,11 @@ export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
     // product_id is internal-only and useless to vendors. styleNumber may
     // be null if the rep typed the line without going through ASI/TSC
     // search — we still emit the row so they can see what's there.
-    const sku = line.sku ?? ctx.sku ?? null;
+    //
+    // Use logical-OR (not ??) so empty strings fall through. The Color
+    // and Size lines come back with sku="" rather than null in real data.
+    const sku =
+      (line.sku && line.sku.trim()) || (ctx.sku && ctx.sku.trim()) || null;
 
     flat.push({
       colorLineId: ctx.color?.line_id ?? line.parent_id,
