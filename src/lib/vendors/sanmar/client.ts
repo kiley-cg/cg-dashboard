@@ -3,9 +3,13 @@ import * as soap from "soap";
 let clientPromise: Promise<soap.Client> | null = null;
 
 function wsdlUrl(): string {
+  // Per SanMar docs (July 2025), the production Inventory 2.0.0 WSDL is
+  // .../InventoryServiceBindingV2final — without "final" you hit a draft
+  // schema that requires a SelectionArray filter and rejects the
+  // documented PartColorArray/LabelSizeArray shape.
   return (
     process.env.SANMAR_WSDL_URL ??
-    "https://ws.sanmar.com:8080/promostandards/InventoryServiceBindingV2?WSDL"
+    "https://ws.sanmar.com:8080/promostandards/InventoryServiceBindingV2final?WSDL"
   );
 }
 
