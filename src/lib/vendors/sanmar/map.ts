@@ -1,19 +1,25 @@
 import type { InventoryLine } from "../types";
 
-// Best-effort flattener for a SanMar getInventoryLevelsResponse.
-// PromoStandards responses are deeply nested XML-converted objects; keep this
-// defensive — log unexpected shapes and return an empty array rather than throw.
+// Flatten a SanMar getInventoryLevels response into normalized inventory rows.
+// XML element names are preserved by the soap library, so casing matters:
+//   <quantityAvailable><Quantity><value>...        ← Quantity is capital Q
+//   <inventoryLocationQuantity><Quantity><value>   ← also capital Q
+// We accept either case as a defensive belt-and-suspenders.
 
-type PartQty = { quantity?: { value?: number | string } };
+type Qty = {
+  Quantity?: { value?: number | string; uom?: string };
+  quantity?: { value?: number | string; uom?: string };
+};
 type Warehouse = {
-  inventoryLocationId?: string;
+  inventoryLocationId?: string | number;
   inventoryLocationName?: string;
-  inventoryLocationQuantity?: PartQty;
+  inventoryLocationQuantity?: Qty;
 };
 type PartInventory = {
+  partId?: string | number;
   partColor?: string;
   labelSize?: string;
-  quantityAvailable?: PartQty;
+  quantityAvailable?: Qty;
   InventoryLocationArray?: { InventoryLocation?: Warehouse | Warehouse[] };
 };
 
@@ -24,6 +30,10 @@ function toNum(v: unknown): number {
     return Number.isFinite(n) ? n : 0;
   }
   return 0;
+}
+
+function readQty(q: Qty | undefined): number {
+  return toNum(q?.Quantity?.value ?? q?.quantity?.value);
 }
 
 function asArray<T>(v: T | T[] | undefined | null): T[] {
@@ -46,15 +56,15 @@ export function mapSanMarInventory(raw: unknown): InventoryLine[] {
     const warehouses = asArray(
       p.InventoryLocationArray?.InventoryLocation,
     ).map((w) => ({
-      id: w.inventoryLocationId ?? "",
+      id: String(w.inventoryLocationId ?? ""),
       name: w.inventoryLocationName,
-      quantity: toNum(w.inventoryLocationQuantity?.quantity?.value),
+      quantity: readQty(w.inventoryLocationQuantity),
     }));
 
     return {
       color: p.partColor ?? null,
       size: p.labelSize ?? null,
-      quantityAvailable: toNum(p.quantityAvailable?.quantity?.value),
+      quantityAvailable: readQty(p.quantityAvailable),
       warehouses: warehouses.length ? warehouses : undefined,
       asOf,
     };
