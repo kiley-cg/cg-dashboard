@@ -38,7 +38,13 @@ export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
 
   const available = matchingAvailable(lookup, line.color, line.size);
   const sufficient = available !== null && available >= line.qtyOrdered;
-  const canVerify = lookup.status === "ok" && sufficient;
+  const isPartial = available !== null && available > 0 && !sufficient;
+  // Verify is allowed whenever SanMar returned data — even on partial or zero
+  // fills. The recorded qtyConfirmed is capped at what's actually available
+  // so the audit trail reflects fillable units, not ordered intent.
+  const canVerify = lookup.status === "ok" && available !== null;
+  const qtyConfirmed =
+    available === null ? 0 : Math.min(line.qtyOrdered, available);
 
   async function onVerify() {
     if (!canVerify || available === null) return;
@@ -53,7 +59,9 @@ export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
           sizeLineId: line.sizeLineId,
           colorLineId: line.colorLineId,
           productId: line.productId,
-          qtyConfirmed: line.qtyOrdered,
+          qtyConfirmed,
+          qtyOrdered: line.qtyOrdered,
+          qtyAvailable: available,
           snapshot: lookup,
         }),
       },
@@ -82,10 +90,14 @@ export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
       <td className="py-3 px-4 text-right tabular-nums">{line.qtyOrdered}</td>
       <td className="py-3 px-4 text-right">
         {lookup.status === "ok" ? (
-          <span
-            className={`tabular-nums ${sufficient ? "text-cg-n-900" : "text-cg-danger font-semibold"}`}
-          >
-            {available ?? 0}
+          <span className="inline-flex items-center gap-2 justify-end">
+            <span
+              className={`tabular-nums ${sufficient ? "text-cg-n-900" : "text-cg-danger font-semibold"}`}
+            >
+              {available ?? 0}
+            </span>
+            {isPartial && <Badge tone="warning">Partial</Badge>}
+            {available === 0 && <Badge tone="danger">Out</Badge>}
           </span>
         ) : lookup.status === "vendor-error" ? (
           <div className="flex flex-col items-end gap-1">
@@ -111,7 +123,13 @@ export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
             disabled={!canVerify || state.kind === "saving"}
             size="sm"
           >
-            {state.kind === "saving" ? "Saving…" : "Verify"}
+            {state.kind === "saving"
+              ? "Saving…"
+              : isPartial
+                ? `Verify ${qtyConfirmed} of ${line.qtyOrdered}`
+                : available === 0
+                  ? "Verify (none avail.)"
+                  : "Verify"}
           </Button>
         )}
         {state.kind === "error" && (

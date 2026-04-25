@@ -8,6 +8,8 @@ const BodySchema = z.object({
   sizeLineId: z.number(),
   colorLineId: z.number().optional(),
   productId: z.string(),
+  qtyOrdered: z.number().int().nonnegative().optional(),
+  qtyAvailable: z.number().int().nonnegative().optional(),
   qtyConfirmed: z.number().int().nonnegative(),
   note: z.string().optional(),
   snapshot: z.unknown(),
@@ -27,8 +29,16 @@ export async function POST(
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
-  const { salesOrderId, sizeLineId, productId, qtyConfirmed, note, snapshot } =
-    parsed.data;
+  const {
+    salesOrderId,
+    sizeLineId,
+    productId,
+    qtyOrdered,
+    qtyAvailable,
+    qtyConfirmed,
+    note,
+    snapshot,
+  } = parsed.data;
   const snap = snapshot as { vendor?: string };
 
   // v1: DB-only audit trail. Once the Syncore Sales Order Status PATCH allowed
@@ -39,6 +49,8 @@ export async function POST(
       syncoreLineId: String(sizeLineId),
       vendor: snap?.vendor ?? "unknown",
       productId,
+      qtyOrdered,
+      qtyAvailable,
       qtyConfirmed,
       vendorSnapshot: snapshot ?? null,
       verifiedByUserId: session.user.id,

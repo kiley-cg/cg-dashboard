@@ -8,6 +8,13 @@
       "when": 1777061824396,
       "tag": "0000_remarkable_union_jack",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777088283071,
+      "tag": "0001_military_namor",
+      "breakpoints": true
     }
   ]
 }

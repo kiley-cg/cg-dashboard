@@ -71,6 +71,8 @@ export const verifications = pgTable("verifications", {
   syncoreLineId: text("syncore_line_id").notNull(),
   vendor: text("vendor").notNull(),
   productId: text("product_id").notNull(),
+  qtyOrdered: integer("qty_ordered"),
+  qtyAvailable: integer("qty_available"),
   qtyConfirmed: integer("qty_confirmed").notNull(),
   vendorSnapshot: jsonb("vendor_snapshot").notNull(),
   verifiedByUserId: text("verified_by_user_id")
