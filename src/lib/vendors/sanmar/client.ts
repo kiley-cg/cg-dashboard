@@ -21,11 +21,11 @@ async function getClient(): Promise<soap.Client> {
 
 export type GetInventoryArgs = {
   productId: string;
-  filterColors?: string[];
-  filterSizes?: string[];
 };
 
-export async function getInventoryLevels(args: GetInventoryArgs): Promise<unknown> {
+export async function getInventoryLevels(
+  args: GetInventoryArgs,
+): Promise<unknown> {
   const id = process.env.SANMAR_WS_ID;
   const password = process.env.SANMAR_WS_PASSWORD;
   if (!id || !password) {
@@ -34,24 +34,16 @@ export async function getInventoryLevels(args: GetInventoryArgs): Promise<unknow
 
   const client = await getClient();
 
-  const payload: Record<string, unknown> = {
+  // PromoStandards Inventory 2.0.0 replaced the 1.0.0 PartColorArray /
+  // LabelSizeArray filter with a SelectionArray of typed Selection items.
+  // Sending the whole style and filtering client-side via
+  // mapSanMarInventory + matchingAvailable keeps us off that schema entirely.
+  const payload = {
     wsVersion: "2.0.0",
     id,
     password,
     productId: args.productId,
   };
-  if (args.filterColors?.length) {
-    payload.Filter = {
-      ...(payload.Filter as object | undefined),
-      PartColorArray: { partColor: args.filterColors },
-    };
-  }
-  if (args.filterSizes?.length) {
-    payload.Filter = {
-      ...(payload.Filter as object | undefined),
-      LabelSizeArray: { labelSize: args.filterSizes },
-    };
-  }
 
   const [response] = (await client.getInventoryLevelsAsync(payload)) as [
     unknown,

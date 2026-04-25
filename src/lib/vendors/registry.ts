@@ -38,11 +38,7 @@ export async function lookupInventory(
   }
 
   try {
-    const raw = await getInventoryLevels({
-      productId,
-      filterColors: line.color ? [line.color] : undefined,
-      filterSizes: line.size ? [line.size] : undefined,
-    });
+    const raw = await getInventoryLevels({ productId });
     return {
       status: "ok",
       vendor,
