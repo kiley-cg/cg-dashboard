@@ -91,9 +91,9 @@ export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
           <div className="flex flex-col items-end gap-1">
             <Badge tone="danger">Vendor error</Badge>
             {lookup.message && (
-              <span className="text-cg-n-500 text-[10px] max-w-[18rem] truncate" title={lookup.message}>
+              <pre className="text-cg-n-500 text-[10px] max-w-[22rem] whitespace-pre-wrap break-all text-right font-mono">
                 {lookup.message}
-              </span>
+              </pre>
             )}
           </div>
         ) : lookup.status === "no-style" ? (
