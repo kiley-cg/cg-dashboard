@@ -7,7 +7,7 @@ export default function HomePage() {
         Jobs
       </p>
       <h1 className="text-4xl font-extrabold tracking-tight mt-2">
-        Verify a job
+        Job Inventory Verification
       </h1>
       <p className="text-cg-n-600 mt-3 mb-8 max-w-xl">
         Enter a Syncore Job ID to pull its sales orders and check live vendor
