@@ -163,6 +163,12 @@ export default async function JobPage({ params }: Props) {
                     Consolidates to a single warehouse
                   </p>
                 )}
+                <p
+                  className="text-cg-n-400 text-[10px] mt-1"
+                  title="Neither SanMar nor S&S exposes a pre-order freight rate API. Wiring a third-party rate provider (Shippo, EasyPost) is a separate scope."
+                >
+                  Freight cost: not available via vendor APIs
+                </p>
               </div>
               {so.status && <Badge tone="neutral">{so.status}</Badge>}
             </div>

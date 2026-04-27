@@ -9,6 +9,7 @@ import {
   pickPrimaryWarehouse,
   warehouseRank,
 } from "@/lib/vendors/warehouse-priority";
+import { transitDays } from "@/lib/vendors/transit";
 import { Badge } from "./Badge";
 import { Button } from "./Button";
 
@@ -242,6 +243,10 @@ export function LineItemRow({
                 title={warehousesTooltip}
               >
                 Ships from {primary.name ?? primary.id}
+                {(() => {
+                  const days = transitDays(primary, shipToZip);
+                  return days != null ? ` · ~${days}-day Ground` : "";
+                })()}
                 {consolidationMatch && " · order-wide"}
               </span>
             )}
