@@ -77,6 +77,16 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
     },
   };
 
+  // UPS Ratetimeintransit requires DeliveryTimeInformation to be set —
+  // without it the API returns 111563. PackageBillType "03" = Non-Document
+  // (apparel goods); pickup date is today, pickup time 14:00 local
+  // (representative of a same-day cutoff).
+  const today = new Date();
+  const pickupDate =
+    String(today.getFullYear()) +
+    String(today.getMonth() + 1).padStart(2, "0") +
+    String(today.getDate()).padStart(2, "0");
+
   const body = {
     RateRequest: {
       Request: {
@@ -100,6 +110,13 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
         ShipmentTotalWeight: {
           UnitOfMeasurement: { Code: "LBS" },
           Weight: String(Math.max(1, Math.ceil(input.totalWeightLbs))),
+        },
+        DeliveryTimeInformation: {
+          PackageBillType: "03",
+          Pickup: {
+            Date: pickupDate,
+            Time: "1400",
+          },
         },
       },
     },
