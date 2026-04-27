@@ -1,19 +1,26 @@
 import type { InventoryLine } from "../types";
 
 // S&S Activewear REST API (api.ssactivewear.com).
+//
 // Auth: HTTP Basic with account number (id) : API key (password).
 //
-// We use /v2/products/?partnumber=… (note trailing slash and lowercase v2):
-//   - The products endpoint returns full SKU detail per color×size, with
-//     per-warehouse quantities, which is exactly what the row UI needs.
-//   - Without the trailing slash the route falls through to /products/{x}
-//     (single-identifier lookup) and rejects the query param with a 404
-//     "Identifier" error.
-//   - `partnumber=` is the documented filter for user-facing style codes
-//     like DG530. `style=` accepts numeric styleIDs only and silently
-//     returns [] for partnumbers.
+// Lookup quirk: Syncore stores S&S items by `styleName` ("DG530",
+// "JST50", etc.) but S&S's products endpoint won't filter by that
+// field directly. The `?style=` filter only accepts numeric StyleID,
+// internal PartNumber (e.g. "674B2"), or "BrandName Name" combined.
+// So we maintain an in-process index built from /v2/styles and
+// translate styleName → styleID before each products lookup.
 
 const DEFAULT_API_BASE = "https://api.ssactivewear.com/v2";
+const STYLES_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+type SSStyle = {
+  styleID?: number;
+  styleName?: string;
+  uniqueStyleName?: string;
+  partNumber?: string;
+  brandName?: string;
+};
 
 type SSWarehouse = {
   warehouseAbbr?: string;
@@ -23,9 +30,7 @@ type SSWarehouse = {
 
 type SSProduct = {
   sku?: string;
-  gtin?: string;
   styleID?: number | string;
-  partNumber?: string;
   qty?: number | string;
   colorName?: string;
   sizeName?: string;
@@ -34,6 +39,14 @@ type SSProduct = {
   warehouses?: SSWarehouse[];
 };
 
+type StylesIndex = {
+  byKey: Map<string, number>;
+  fetchedAt: number;
+};
+
+let stylesCache: StylesIndex | null = null;
+let stylesPending: Promise<StylesIndex> | null = null;
+
 function toNum(v: unknown): number {
   if (typeof v === "number") return v;
   if (typeof v === "string") {
@@ -41,6 +54,61 @@ function toNum(v: unknown): number {
     return Number.isFinite(n) ? n : 0;
   }
   return 0;
+}
+
+function basicAuthHeader(accountNumber: string, apiKey: string): string {
+  return `Basic ${Buffer.from(`${accountNumber}:${apiKey}`).toString("base64")}`;
+}
+
+function indexKey(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+async function loadStylesIndex(
+  base: string,
+  authHeader: string,
+): Promise<StylesIndex> {
+  const res = await fetch(`${base}/styles?mediatype=json`, {
+    headers: { Accept: "application/json", Authorization: authHeader },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(
+      `S&S /styles index fetch failed (${res.status}). Cannot resolve style names to IDs.`,
+    );
+  }
+  const styles = (await res.json()) as SSStyle[];
+  const byKey = new Map<string, number>();
+  for (const s of styles) {
+    if (s.styleID == null) continue;
+    if (s.styleName) byKey.set(indexKey(s.styleName), s.styleID);
+    if (s.uniqueStyleName) byKey.set(indexKey(s.uniqueStyleName), s.styleID);
+    if (s.partNumber) byKey.set(indexKey(s.partNumber), s.styleID);
+  }
+  return { byKey, fetchedAt: Date.now() };
+}
+
+async function getStyleId(
+  styleName: string,
+  base: string,
+  authHeader: string,
+): Promise<number | null> {
+  const now = Date.now();
+  if (!stylesCache || now - stylesCache.fetchedAt > STYLES_TTL_MS) {
+    // Coalesce concurrent first-load requests so we don't hammer the index.
+    if (!stylesPending) {
+      stylesPending = loadStylesIndex(base, authHeader)
+        .then((idx) => {
+          stylesCache = idx;
+          return idx;
+        })
+        .finally(() => {
+          stylesPending = null;
+        });
+    }
+    await stylesPending;
+  }
+  return stylesCache?.byKey.get(indexKey(styleName)) ?? null;
 }
 
 export async function fetchSSInventory(
@@ -56,45 +124,42 @@ export async function fetchSSInventory(
     /\/+$/,
     "",
   );
+  const authHeader = basicAuthHeader(accountNumber, apiKey);
+
+  const styleID = await getStyleId(productId, base, authHeader);
+  if (styleID == null) {
+    throw new Error(
+      `S&S has no style "${productId}" — not in your account's catalog (may be discontinued, misspelled, or the supplier on this Syncore line is incorrect).`,
+    );
+  }
+
   const params = new URLSearchParams({
-    partnumber: productId,
+    style: String(styleID),
     mediatype: "json",
   });
-  // Trailing slash on /products/ is required — without it, ASP.NET routes
-  // the request to /products/{Identifier} and 404s.
   const url = `${base}/products/?${params.toString()}`;
 
-  const auth = Buffer.from(`${accountNumber}:${apiKey}`).toString("base64");
-
   const res = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      Authorization: `Basic ${auth}`,
-    },
+    headers: { Accept: "application/json", Authorization: authHeader },
     cache: "no-store",
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    if (res.status === 404) {
-      throw new Error(
-        `S&S has no style "${productId}" — may be discontinued or the supplier on this Syncore line is incorrect.`,
-      );
-    }
     if (res.status === 401 || res.status === 403) {
       throw new Error(
         `S&S authentication failed (${res.status}). Verify SS_WS_ID is the account number and SS_WS_PASSWORD is the API key.`,
       );
     }
     throw new Error(
-      `S&S /products/?partnumber=${productId} → ${res.status}: ${body || res.statusText}`,
+      `S&S /products/?style=${styleID} (resolved from "${productId}") → ${res.status}: ${body || res.statusText}`,
     );
   }
 
   const data = (await res.json()) as unknown;
   if (Array.isArray(data) && data.length === 0) {
     throw new Error(
-      `S&S returned no products for style "${productId}" — may be discontinued or the supplier on this Syncore line is incorrect.`,
+      `S&S returned no products for style "${productId}" (styleID ${styleID}).`,
     );
   }
   return mapSSProducts(data);
