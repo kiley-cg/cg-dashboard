@@ -1,33 +1,98 @@
-import { getInventoryLevels } from "../promostandards/inventory";
-import { mapPromoStandardsInventory } from "../promostandards/map";
 import type { InventoryLine } from "../types";
 
-// S&S Activewear publishes their PromoStandards Inventory 2.0.0 endpoint at
-// promostandards.ssactivewear.com. The credentials are typically the partner
-// account number (id) and the integration password issued by S&S — distinct
-// from the ssactivewear.com website login. Set SS_WS_ID and SS_WS_PASSWORD
-// in Vercel env vars.
+// S&S Activewear REST API (api.ssactivewear.com) — preferred over their
+// PromoStandards SOAP endpoint, which uses a WCF-generated WSDL with
+// xsd:imports that node-soap cannot reliably parse.
 //
-// `?singleWsdl` (WCF feature) returns the WSDL with all <xsd:import/>'d
-// schemas inlined into one document. node-soap doesn't reliably follow
-// those imports otherwise, leading to "Cannot read properties of undefined
-// (reading 'description')" inside its WSDL parser.
-const DEFAULT_WSDL =
-  "https://promostandards.ssactivewear.com/Inventory/v2/InventoryService.svc?singleWsdl";
+// Auth: HTTP Basic with account number (id) : API key (password). Both come
+// from the credentials S&S email when api@ssactivewear.com issues an API key.
+//
+// Inventory lookup: GET /V2/products/{style} returns a JSON array of every
+// SKU under the given style (one entry per color × size) with per-warehouse
+// quantities. We pass the SKU/style number from Syncore as `style`.
+
+const DEFAULT_API_BASE = "https://api.ssactivewear.com/V2";
+
+type SSProduct = {
+  sku?: string;
+  partNumber?: string;
+  styleID?: number | string;
+  qty?: number | string;
+  colorName?: string;
+  sizeName?: string;
+  size?: string;
+  color?: string;
+  warehouses?: Array<{
+    warehouseAbbr?: string;
+    warehouseName?: string;
+    qty?: number | string;
+  }>;
+};
+
+function toNum(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
 
 export async function fetchSSInventory(
   productId: string,
 ): Promise<InventoryLine[]> {
-  const id = process.env.SS_WS_ID;
-  const password = process.env.SS_WS_PASSWORD;
-  if (!id || !password) {
+  const accountNumber = process.env.SS_WS_ID?.trim();
+  const apiKey = process.env.SS_WS_PASSWORD?.trim();
+  if (!accountNumber || !apiKey) {
     throw new Error("SS_WS_ID and SS_WS_PASSWORD must be set");
   }
-  const raw = await getInventoryLevels({
-    wsdlUrl: process.env.SS_WSDL_URL ?? DEFAULT_WSDL,
-    id,
-    password,
-    productId,
+
+  const base = (process.env.SS_API_BASE_URL?.trim() ?? DEFAULT_API_BASE).replace(
+    /\/+$/,
+    "",
+  );
+  const url = `${base}/products/${encodeURIComponent(productId)}?mediatype=json`;
+
+  const auth = Buffer.from(`${accountNumber}:${apiKey}`).toString("base64");
+
+  const res = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Basic ${auth}`,
+    },
+    cache: "no-store",
   });
-  return mapPromoStandardsInventory(raw);
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `S&S GET /products/${productId} → ${res.status}: ${body || res.statusText}`,
+    );
+  }
+
+  const data = (await res.json()) as unknown;
+  return mapSSProducts(data);
+}
+
+function mapSSProducts(raw: unknown): InventoryLine[] {
+  const products: SSProduct[] = Array.isArray(raw) ? (raw as SSProduct[]) : [];
+  const asOf = new Date().toISOString();
+
+  return products.map((p): InventoryLine => {
+    const warehouses = Array.isArray(p.warehouses)
+      ? p.warehouses.map((w, i) => ({
+          id: w.warehouseAbbr ?? String(i),
+          name: w.warehouseName ?? w.warehouseAbbr,
+          quantity: toNum(w.qty),
+        }))
+      : [];
+
+    return {
+      color: p.colorName ?? p.color ?? null,
+      size: p.sizeName ?? p.size ?? null,
+      quantityAvailable: toNum(p.qty),
+      warehouses: warehouses.length ? warehouses : undefined,
+      asOf,
+    };
+  });
 }
