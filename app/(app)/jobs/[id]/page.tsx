@@ -191,7 +191,19 @@ export default async function JobPage({ params }: Props) {
                 {freight.status === "ok" && (
                   <p
                     className="text-cg-n-700 text-[11px] mt-1 tabular-nums"
-                    title={`UPS ${freight.estimate.serviceName} · ${freight.estimate.packages} package${freight.estimate.packages === 1 ? "" : "s"} · ${freight.totalWeightLbs} lbs · ${freight.fromZip} → ${shipToZip ?? "98512"} · ${freight.estimate.isNegotiated ? "negotiated rate" : "list rate"}`}
+                    title={[
+                      `UPS ${freight.estimate.serviceName}  ·  ${freight.estimate.isNegotiated ? "negotiated rate" : "list rate"}`,
+                      `From: ${freight.fromZip}  →  To: ${freight.toZip}`,
+                      `Quantity: ${freight.totalQty.toLocaleString()} pieces`,
+                      `Weight: ${freight.totalQty.toLocaleString()} × ${freight.perPieceWeightLbs} lb/piece = ${freight.totalWeightLbs} lbs total`,
+                      `Packages: ${freight.estimate.packages} (≤70 lb each, 24×16×16 in default)`,
+                      freight.estimate.transitDays != null
+                        ? `Transit: ${freight.estimate.transitDays} business day${freight.estimate.transitDays === 1 ? "" : "s"}`
+                        : "Transit: not returned",
+                      `Total: ${freight.estimate.totalCharge.toLocaleString("en-US", { style: "currency", currency: freight.estimate.currency })}`,
+                      "",
+                      "Per-piece weight is a 0.5 lb default; refine when SKU weights are wired in.",
+                    ].join("\n")}
                   >
                     Estimated freight:{" "}
                     <span className="font-semibold">
@@ -206,6 +218,8 @@ export default async function JobPage({ params }: Props) {
                       : ""}
                     {" · "}
                     {freight.totalWeightLbs} lbs
+                    {" · "}
+                    <span className="text-cg-n-500">hover for details</span>
                   </p>
                 )}
                 {freight.status === "skipped" && (

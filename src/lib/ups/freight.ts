@@ -16,7 +16,15 @@ export type FreightEstimateInput = {
 };
 
 export type FreightEstimateResult =
-  | { status: "ok"; estimate: RateEstimate; totalWeightLbs: number; fromZip: string }
+  | {
+      status: "ok";
+      estimate: RateEstimate;
+      totalWeightLbs: number;
+      fromZip: string;
+      toZip: string;
+      totalQty: number;
+      perPieceWeightLbs: number;
+    }
   | { status: "skipped"; reason: string }
   | { status: "error"; message: string };
 
@@ -52,7 +60,28 @@ export async function estimateFreight(
       toZip,
       totalWeightLbs,
     });
-    return { status: "ok", estimate, totalWeightLbs, fromZip };
+    console.log("[ups] freight estimate", {
+      fromZip,
+      toZip,
+      totalQty: input.totalQty,
+      perPieceWeightLbs: perPieceLbs,
+      totalWeightLbs,
+      packages: estimate.packages,
+      service: estimate.serviceName,
+      totalCharge: estimate.totalCharge,
+      currency: estimate.currency,
+      transitDays: estimate.transitDays,
+      isNegotiated: estimate.isNegotiated,
+    });
+    return {
+      status: "ok",
+      estimate,
+      totalWeightLbs,
+      fromZip,
+      toZip,
+      totalQty: input.totalQty,
+      perPieceWeightLbs: perPieceLbs,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[ups] freight estimate failed", {
