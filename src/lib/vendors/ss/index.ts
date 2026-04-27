@@ -204,6 +204,7 @@ function mapSSProducts(raw: unknown): InventoryLine[] {
         toPrice(p.customerPrice) ??
         toPrice(p.salePrice) ??
         toPrice(p.piecePrice),
+      msrp: toPrice(p.piecePrice),
       casePrice: toPrice(p.casePrice),
       warehouses: warehouses.length ? warehouses : undefined,
       asOf,

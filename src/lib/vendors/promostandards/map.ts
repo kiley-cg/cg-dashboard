@@ -73,6 +73,7 @@ export function mapPromoStandardsInventory(raw: unknown): InventoryLine[] {
       // it comes from the separate Pricing service. The vendor wrapper
       // is responsible for merging it in if available.
       yourCost: null,
+      msrp: null,
       casePrice: null,
       warehouses: warehouses.length ? warehouses : undefined,
       asOf,

@@ -53,6 +53,7 @@ export async function fetchSanMarInventory(
     const match = priceByKey.get(priceKey(line.color, line.size));
     if (!match) continue;
     line.yourCost = match.myPrice ?? match.salePrice ?? match.piecePrice;
+    line.msrp = match.piecePrice;
     line.casePrice = match.casePrice;
   }
   return lines;

@@ -119,6 +119,22 @@ export function LineItemRow({
   const sufficient = available !== null && available >= line.qtyOrdered;
   const isPartial = available !== null && available > 0 && !sufficient;
   const warehouses = inventoryLine?.warehouses?.filter((w) => w.quantity > 0) ?? [];
+
+  // "Ships from": the single warehouse most likely to fulfill this line.
+  // Vendor freight optimizers pick the closest warehouse with enough stock,
+  // so without ship-to context our best heuristic is the warehouse with the
+  // largest qty that can satisfy the ordered quantity by itself. If none
+  // can, the order will split across warehouses.
+  const singleSource =
+    line.qtyOrdered > 0
+      ? [...warehouses]
+          .filter((w) => w.quantity >= line.qtyOrdered)
+          .sort((a, b) => b.quantity - a.quantity)[0] ?? null
+      : warehouses[0] ?? null;
+  const willSplit = warehouses.length > 0 && !singleSource && available !== null && available > 0;
+  const warehousesTooltip = warehouses
+    .map((w) => `${w.name ?? w.id}: ${w.quantity.toLocaleString()}`)
+    .join("\n");
   // Verify is allowed whenever SanMar returned data — even on partial or zero
   // fills. The recorded qtyConfirmed is capped at what's actually available
   // so the audit trail reflects fillable units, not ordered intent.
@@ -195,16 +211,20 @@ export function LineItemRow({
               {isPartial && <Badge tone="warning">Partial</Badge>}
               {available === 0 && <Badge tone="danger">Out</Badge>}
             </span>
-            {warehouses.length > 0 && (
+            {singleSource && (
               <span
-                className="text-cg-n-500 text-[10px] tabular-nums"
-                title={warehouses
-                  .map((w) => `${w.name ?? w.id}: ${w.quantity}`)
-                  .join("\n")}
+                className="text-cg-n-500 text-[10px]"
+                title={warehousesTooltip}
               >
-                {warehouses
-                  .map((w) => `${w.id} ${w.quantity.toLocaleString()}`)
-                  .join(" · ")}
+                Ships from {singleSource.name ?? singleSource.id}
+              </span>
+            )}
+            {willSplit && (
+              <span
+                className="text-cg-warning text-[10px]"
+                title={warehousesTooltip}
+              >
+                Ships from multiple warehouses
               </span>
             )}
           </div>
@@ -225,14 +245,36 @@ export function LineItemRow({
       </td>
       <td className="py-3 px-4 text-right tabular-nums align-top">
         {inventoryLine ? (
-          <span className="text-cg-n-900">
-            {formatMoney(inventoryLine.yourCost)}
-            {inventoryLine.casePrice != null && (
-              <span className="text-cg-n-500 ml-1">
-                ({formatMoney(inventoryLine.casePrice)})
+          <div className="flex flex-col items-end gap-0.5 text-xs">
+            <div className="inline-flex items-baseline gap-2">
+              <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
+                Cost
               </span>
+              <span className="text-cg-n-900 font-semibold">
+                {formatMoney(inventoryLine.yourCost)}
+              </span>
+            </div>
+            {inventoryLine.msrp != null && (
+              <div className="inline-flex items-baseline gap-2">
+                <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
+                  MSRP
+                </span>
+                <span className="text-cg-n-700">
+                  {formatMoney(inventoryLine.msrp)}
+                </span>
+              </div>
             )}
-          </span>
+            {inventoryLine.casePrice != null && (
+              <div className="inline-flex items-baseline gap-2">
+                <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
+                  Case
+                </span>
+                <span className="text-cg-n-500">
+                  {formatMoney(inventoryLine.casePrice)}
+                </span>
+              </div>
+            )}
+          </div>
         ) : (
           <span className="text-cg-n-400">—</span>
         )}

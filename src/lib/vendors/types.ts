@@ -14,6 +14,9 @@ export type InventoryLine = {
   // Contracted / customer-specific price per piece. SanMar = "mySpecialPrice",
   // S&S = "yourPrice". Null when the vendor didn't return one.
   yourCost: number | null;
+  // Suggested retail price (MSRP) — what an end customer would pay buying
+  // single pieces. Both vendors expose this as `piecePrice`.
+  msrp: number | null;
   // Per-piece price when buying a full case. Both vendors expose this.
   casePrice: number | null;
   warehouses?: Array<{

@@ -89,7 +89,7 @@ export default async function QuotePage({ params }: Props) {
               <th className="py-3 px-4 font-semibold">Color / Size</th>
               <th className="py-3 px-4 text-right font-semibold">Ordered</th>
               <th className="py-3 px-4 text-right font-semibold">Available</th>
-              <th className="py-3 px-4 text-right font-semibold">Cost</th>
+              <th className="py-3 px-4 text-right font-semibold">Pricing</th>
               <th className="py-3 px-4 text-right font-semibold"></th>
             </tr>
           </thead>
