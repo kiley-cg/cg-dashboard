@@ -51,12 +51,14 @@ export async function fetchSSInventory(
     /\/+$/,
     "",
   );
-  // S&S's path param /products/{x} expects {x} to be a SKU (e.g. B000000001).
-  // Style numbers / partnumbers (e.g. DG530, JST50) must be passed as a
-  // query parameter — otherwise the API returns 404 because it's looking up
-  // "is this a SKU?" and finding nothing.
+  // S&S's path param /products/{x} expects {x} to be a SKU (e.g. B000000001),
+  // not a style number. Query params for filtering:
+  //   ?styleID=39       — numeric internal ID
+  //   ?partnumber=DG530 — user-facing style code (what we have from Syncore)
+  // Using `style=` silently returns [] for non-numeric values, so always
+  // route partnumbers through the partnumber filter.
   const params = new URLSearchParams({
-    style: productId,
+    partnumber: productId,
     mediatype: "json",
   });
   const url = `${base}/products?${params.toString()}`;
