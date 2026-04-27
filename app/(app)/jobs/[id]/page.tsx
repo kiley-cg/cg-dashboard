@@ -57,12 +57,14 @@ export default async function JobPage({ params }: Props) {
 
   // Hybrid: auto-verify rows where SanMar can fully fill the order; require
   // explicit click for partial fills, zero stock, or vendor errors.
-  let verifiedKeys: Set<string> = new Set();
+  let verifications: Awaited<ReturnType<typeof findVerificationsForJob>> =
+    new Map();
   if (userId) {
     const existing = await findVerificationsForJob(id);
-    verifiedKeys = await autoVerifyClean({
+    verifications = await autoVerifyClean({
       jobId: id,
       userId,
+      userEmail: session?.user?.email ?? null,
       alreadyVerified: existing,
       salesOrders: enriched.map((e) => ({
         salesOrderId: e.salesOrder.id,
@@ -160,7 +162,8 @@ export default async function JobPage({ params }: Props) {
                       salesOrderId={so.id}
                       line={line}
                       lookup={lookup}
-                      preVerified={verifiedKeys.has(key)}
+                      verification={verifications.get(key) ?? null}
+                      currentUserEmail={session?.user?.email ?? null}
                     />
                   );
                 })}

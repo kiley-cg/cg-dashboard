@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { FlatLineItem } from "@/lib/syncore/types";
 import type { InventoryLookup } from "@/lib/vendors/types";
+import type { VerificationDetail } from "@/lib/db/verifications";
 import { Badge } from "./Badge";
 import { Button } from "./Button";
 
@@ -11,7 +12,8 @@ type Props = {
   salesOrderId: number;
   line: FlatLineItem;
   lookup: InventoryLookup;
-  preVerified?: boolean;
+  verification: VerificationDetail | null;
+  currentUserEmail: string | null;
 };
 
 function matchingAvailable(
@@ -29,19 +31,49 @@ function matchingAvailable(
   return lookup.lines.reduce((n, l) => n + l.quantityAvailable, 0);
 }
 
+function shortName(email: string | null): string {
+  if (!email) return "unknown";
+  return email.split("@")[0] ?? email;
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function tooltip(v: VerificationDetail): string {
+  const parts = [
+    `Verified by ${v.verifiedByEmail ?? "unknown"}`,
+    `at ${new Date(v.verifiedAt).toLocaleString()}`,
+  ];
+  if (v.qtyOrdered != null && v.qtyAvailable != null) {
+    parts.push(
+      `Confirmed ${v.qtyConfirmed} of ${v.qtyOrdered} ordered (SanMar had ${v.qtyAvailable} available at the time)`,
+    );
+  }
+  if (v.note) parts.push(v.note);
+  return parts.join("\n");
+}
+
 export function LineItemRow({
   jobId,
   salesOrderId,
   line,
   lookup,
-  preVerified = false,
+  verification,
+  currentUserEmail,
 }: Props) {
   const [state, setState] = useState<
     | { kind: "idle" }
     | { kind: "saving" }
-    | { kind: "ok" }
+    | { kind: "ok"; verification: VerificationDetail }
     | { kind: "error"; message: string }
-  >(preVerified ? { kind: "ok" } : { kind: "idle" });
+  >(verification ? { kind: "ok", verification } : { kind: "idle" });
 
   const available = matchingAvailable(lookup, line.color, line.size);
   const sufficient = available !== null && available >= line.qtyOrdered;
@@ -74,7 +106,21 @@ export function LineItemRow({
       },
     );
     if (res.ok) {
-      setState({ kind: "ok" });
+      setState({
+        kind: "ok",
+        verification: {
+          verifiedAt: new Date().toISOString(),
+          verifiedByEmail: currentUserEmail,
+          qtyOrdered: line.qtyOrdered,
+          qtyAvailable: available,
+          qtyConfirmed,
+          note: isPartial
+            ? "manually verified: partial fill"
+            : available === 0
+              ? "manually verified: no stock"
+              : "manually verified",
+        },
+      });
     } else {
       const body = await res.text().catch(() => "");
       setState({
@@ -123,7 +169,16 @@ export function LineItemRow({
       </td>
       <td className="py-3 px-4 text-right">
         {state.kind === "ok" ? (
-          <Badge tone="success">Verified</Badge>
+          <div
+            className="flex flex-col items-end gap-0.5"
+            title={tooltip(state.verification)}
+          >
+            <Badge tone="success">Verified</Badge>
+            <span className="text-cg-n-500 text-[10px] tabular-nums">
+              by {shortName(state.verification.verifiedByEmail)} ·{" "}
+              {formatTime(state.verification.verifiedAt)}
+            </span>
+          </div>
         ) : (
           <Button
             onClick={onVerify}
