@@ -1,12 +1,13 @@
 import type { FlatLineItem } from "../syncore/types";
 import { fetchSanMarInventory } from "./sanmar";
 import { fetchSSInventory } from "./ss";
+import { fetchCutterBuckInventory } from "./cb";
 import type { InventoryLookup, VendorCode } from "./types";
 
 /**
  * Map a Syncore supplier name to one of our adapters. Match on the
  * lowercased name; if Color Graphics adds another vendor, add a clause
- * here and a thin adapter beside ./sanmar/ and ./ss/.
+ * here and a thin adapter beside ./sanmar/, ./ss/, ./cb/.
  */
 function resolveVendor(supplierName: string | null): VendorCode {
   const name = supplierName?.toLowerCase().trim() ?? "";
@@ -19,6 +20,7 @@ function resolveVendor(supplierName: string | null): VendorCode {
   ) {
     return "ss";
   }
+  if (name.includes("cutter")) return "cb";
   return "unknown";
 }
 
@@ -50,7 +52,9 @@ export async function lookupInventory(
     const lines =
       vendor === "sanmar"
         ? await fetchSanMarInventory(productId)
-        : await fetchSSInventory(productId);
+        : vendor === "ss"
+          ? await fetchSSInventory(productId)
+          : await fetchCutterBuckInventory(productId);
     return { status: "ok", vendor, productId, lines };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
