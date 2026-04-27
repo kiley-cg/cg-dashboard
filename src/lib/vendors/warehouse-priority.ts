@@ -29,13 +29,13 @@ type Region =
 // accommodates both.
 
 const WEST: ReadonlyArray<readonly string[]> = [
-  ["seattle", "wa"],
+  ["seattle", "renton", "wa"],
   ["reno", "nv"],
   ["phoenix", "az"],
   ["dallas", "fort worth", "ft worth", "tx"],
   ["olathe", "kansas", "ks"],
   ["lockport", "illinois", "il"],
-  ["cincinnati", "ohio", "oh"],
+  ["cincinnati", "hebron", "ohio", "oh", "ky"],
   ["minneapolis", "mn"],
   ["atlanta", "ga"],
   ["richmond", "va"],
@@ -50,7 +50,7 @@ const CENTRAL_SOUTH: ReadonlyArray<readonly string[]> = [
   ["olathe", "kansas", "ks"],
   ["atlanta", "ga"],
   ["jacksonville", "fl"],
-  ["cincinnati", "ohio", "oh"],
+  ["cincinnati", "hebron", "ohio", "oh", "ky"],
   ["minneapolis", "mn"],
   ["lockport", "illinois", "il"],
   ["richmond", "va"],
@@ -59,14 +59,14 @@ const CENTRAL_SOUTH: ReadonlyArray<readonly string[]> = [
   ["phoenix", "az"],
   ["reno", "nv"],
   ["middleboro", "lakeville", "ma"],
-  ["seattle", "wa"],
+  ["seattle", "renton", "wa"],
 ];
 
 const MIDWEST: ReadonlyArray<readonly string[]> = [
   ["minneapolis", "mn"],
   ["lockport", "illinois", "il"],
   ["olathe", "kansas", "ks"],
-  ["cincinnati", "ohio", "oh"],
+  ["cincinnati", "hebron", "ohio", "oh", "ky"],
   ["dallas", "fort worth", "ft worth", "tx"],
   ["atlanta", "ga"],
   ["richmond", "va"],
@@ -76,14 +76,14 @@ const MIDWEST: ReadonlyArray<readonly string[]> = [
   ["middleboro", "lakeville", "ma"],
   ["phoenix", "az"],
   ["reno", "nv"],
-  ["seattle", "wa"],
+  ["seattle", "renton", "wa"],
 ];
 
 const SOUTHEAST: ReadonlyArray<readonly string[]> = [
   ["jacksonville", "fl"],
   ["atlanta", "ga"],
   ["richmond", "va"],
-  ["cincinnati", "ohio", "oh"],
+  ["cincinnati", "hebron", "ohio", "oh", "ky"],
   ["robbinsville", "cranbury", "nj"],
   ["reading", "pa"],
   ["dallas", "fort worth", "ft worth", "tx"],
@@ -93,7 +93,7 @@ const SOUTHEAST: ReadonlyArray<readonly string[]> = [
   ["minneapolis", "mn"],
   ["phoenix", "az"],
   ["reno", "nv"],
-  ["seattle", "wa"],
+  ["seattle", "renton", "wa"],
 ];
 
 const NORTHEAST: ReadonlyArray<readonly string[]> = [
@@ -101,7 +101,7 @@ const NORTHEAST: ReadonlyArray<readonly string[]> = [
   ["reading", "pa"],
   ["middleboro", "lakeville", "ma"],
   ["richmond", "va"],
-  ["cincinnati", "ohio", "oh"],
+  ["cincinnati", "hebron", "ohio", "oh", "ky"],
   ["lockport", "illinois", "il"],
   ["jacksonville", "fl"],
   ["atlanta", "ga"],
@@ -110,7 +110,7 @@ const NORTHEAST: ReadonlyArray<readonly string[]> = [
   ["dallas", "fort worth", "ft worth", "tx"],
   ["phoenix", "az"],
   ["reno", "nv"],
-  ["seattle", "wa"],
+  ["seattle", "renton", "wa"],
 ];
 
 const PRIORITIES: Record<Region, ReadonlyArray<readonly string[]>> = {

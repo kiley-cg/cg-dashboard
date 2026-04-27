@@ -16,14 +16,14 @@ const WAREHOUSE_TRANSIT_DAYS_TO_HOME: ReadonlyArray<{
   keywords: readonly string[];
   days: number;
 }> = [
-  { keywords: ["seattle", "wa"], days: 1 },
+  { keywords: ["seattle", "renton", "wa"], days: 1 },
   { keywords: ["reno", "nv"], days: 2 },
   { keywords: ["phoenix", "az"], days: 3 },
   { keywords: ["dallas", "fort worth", "ft worth", "tx"], days: 4 },
   { keywords: ["olathe", "kansas", "ks"], days: 4 },
   { keywords: ["lockport", "illinois", "il"], days: 4 },
   { keywords: ["minneapolis", "mn"], days: 4 },
-  { keywords: ["cincinnati", "ohio", "oh"], days: 5 },
+  { keywords: ["cincinnati", "hebron", "ohio", "oh", "ky"], days: 5 },
   { keywords: ["atlanta", "ga"], days: 5 },
   { keywords: ["richmond", "va"], days: 5 },
   { keywords: ["robbinsville", "cranbury", "nj"], days: 5 },

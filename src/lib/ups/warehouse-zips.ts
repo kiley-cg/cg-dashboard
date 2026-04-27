@@ -21,6 +21,16 @@ const SS_WAREHOUSE_ZIPS: ReadonlyArray<{
   { keywords: ["fort worth", "ft worth", "dallas", "tx"], zip: "76140" },
 ];
 
+// Cutter & Buck distribution centers per their PromoStandards docs:
+// Renton, WA (Plant_Renton) and Hebron, KY (Plant_Hebron).
+const CB_WAREHOUSE_ZIPS: ReadonlyArray<{
+  keywords: readonly string[];
+  zip: string;
+}> = [
+  { keywords: ["renton"], zip: "98055" },
+  { keywords: ["hebron"], zip: "41048" },
+];
+
 // SanMar's published warehouse zips (also returned in their Inventory
 // response, kept here as a fallback when the response omits them).
 const SANMAR_WAREHOUSE_ZIPS: ReadonlyArray<{
@@ -38,7 +48,11 @@ const SANMAR_WAREHOUSE_ZIPS: ReadonlyArray<{
   { keywords: ["richmond", "va"], zip: "23226" },
 ];
 
-const ALL = [...SANMAR_WAREHOUSE_ZIPS, ...SS_WAREHOUSE_ZIPS];
+const ALL = [
+  ...SANMAR_WAREHOUSE_ZIPS,
+  ...SS_WAREHOUSE_ZIPS,
+  ...CB_WAREHOUSE_ZIPS,
+];
 
 export function warehouseZip(warehouse: {
   id: string;
