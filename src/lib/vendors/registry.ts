@@ -1,16 +1,25 @@
 import type { FlatLineItem } from "../syncore/types";
-import { getInventoryLevels } from "./sanmar/client";
-import { mapSanMarInventory } from "./sanmar/map";
+import { fetchSanMarInventory } from "./sanmar";
+import { fetchSSInventory } from "./ss";
 import type { InventoryLookup, VendorCode } from "./types";
 
-// SanMar is supplier_id 65 in our Syncore tenant (and more broadly, ASI 84863).
-// Until Color Graphics has multiple vendor adapters, resolveVendor falls back
-// to SanMar when the supplier doesn't match anything explicit.
+/**
+ * Map a Syncore supplier name to one of our adapters. Match on the
+ * lowercased name; if Color Graphics adds another vendor, add a clause
+ * here and a thin adapter beside ./sanmar/ and ./ss/.
+ */
 function resolveVendor(supplierName: string | null): VendorCode {
   const name = supplierName?.toLowerCase().trim() ?? "";
+  if (!name) return "unknown";
   if (name.includes("sanmar")) return "sanmar";
-  // v1 default — revisit when we add a second adapter.
-  return "sanmar";
+  if (
+    name.includes("s&s") ||
+    name.includes("ssactivewear") ||
+    name.includes("ss activewear")
+  ) {
+    return "ss";
+  }
+  return "unknown";
 }
 
 export async function lookupInventory(
@@ -38,13 +47,11 @@ export async function lookupInventory(
   }
 
   try {
-    const raw = await getInventoryLevels({ productId });
-    return {
-      status: "ok",
-      vendor,
-      productId,
-      lines: mapSanMarInventory(raw),
-    };
+    const lines =
+      vendor === "sanmar"
+        ? await fetchSanMarInventory(productId)
+        : await fetchSSInventory(productId);
+    return { status: "ok", vendor, productId, lines };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(

@@ -1,4 +1,11 @@
-export type VendorCode = "sanmar" | "unknown";
+export type VendorCode = "sanmar" | "ss" | "unknown";
+
+// Human-readable label for a vendor — used in tooltips, audit notes, etc.
+export const vendorLabel: Record<VendorCode, string> = {
+  sanmar: "SanMar",
+  ss: "S&S Activewear",
+  unknown: "unknown vendor",
+};
 
 export type InventoryLine = {
   color: string | null;

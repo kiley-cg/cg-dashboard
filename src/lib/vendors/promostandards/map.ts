@@ -1,10 +1,14 @@
 import type { InventoryLine } from "../types";
 
-// Flatten a SanMar getInventoryLevels response into normalized inventory rows.
+// Flatten a PromoStandards getInventoryLevels 2.0.0 response into normalized
+// inventory rows. Used by every PromoStandards-compliant vendor (SanMar,
+// S&S Activewear, etc.) — the schema is part of the open spec.
+//
 // XML element names are preserved by the soap library, so casing matters:
 //   <quantityAvailable><Quantity><value>...        ← Quantity is capital Q
 //   <inventoryLocationQuantity><Quantity><value>   ← also capital Q
-// We accept either case as a defensive belt-and-suspenders.
+// We accept either case as a defensive belt-and-suspenders for vendors that
+// stray from the spec.
 
 type Qty = {
   Quantity?: { value?: number | string; uom?: string };
@@ -41,7 +45,7 @@ function asArray<T>(v: T | T[] | undefined | null): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
-export function mapSanMarInventory(raw: unknown): InventoryLine[] {
+export function mapPromoStandardsInventory(raw: unknown): InventoryLine[] {
   const parts = asArray(
     (raw as {
       Inventory?: {
