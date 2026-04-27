@@ -1,32 +1,37 @@
 import type { InventoryLine } from "../types";
 
-// S&S Activewear REST API (api.ssactivewear.com) — preferred over their
-// PromoStandards SOAP endpoint, which uses a WCF-generated WSDL with
-// xsd:imports that node-soap cannot reliably parse.
+// S&S Activewear REST API (api.ssactivewear.com).
+// Auth: HTTP Basic with account number (id) : API key (password).
 //
-// Auth: HTTP Basic with account number (id) : API key (password). Both come
-// from the credentials S&S email when api@ssactivewear.com issues an API key.
-//
-// Inventory lookup: GET /V2/products/{style} returns a JSON array of every
-// SKU under the given style (one entry per color × size) with per-warehouse
-// quantities. We pass the SKU/style number from Syncore as `style`.
+// We use /v2/products/?partnumber=… (note trailing slash and lowercase v2):
+//   - The products endpoint returns full SKU detail per color×size, with
+//     per-warehouse quantities, which is exactly what the row UI needs.
+//   - Without the trailing slash the route falls through to /products/{x}
+//     (single-identifier lookup) and rejects the query param with a 404
+//     "Identifier" error.
+//   - `partnumber=` is the documented filter for user-facing style codes
+//     like DG530. `style=` accepts numeric styleIDs only and silently
+//     returns [] for partnumbers.
 
-const DEFAULT_API_BASE = "https://api.ssactivewear.com/V2";
+const DEFAULT_API_BASE = "https://api.ssactivewear.com/v2";
+
+type SSWarehouse = {
+  warehouseAbbr?: string;
+  warehouseName?: string;
+  qty?: number | string;
+};
 
 type SSProduct = {
   sku?: string;
-  partNumber?: string;
+  gtin?: string;
   styleID?: number | string;
+  partNumber?: string;
   qty?: number | string;
   colorName?: string;
   sizeName?: string;
   size?: string;
   color?: string;
-  warehouses?: Array<{
-    warehouseAbbr?: string;
-    warehouseName?: string;
-    qty?: number | string;
-  }>;
+  warehouses?: SSWarehouse[];
 };
 
 function toNum(v: unknown): number {
@@ -51,17 +56,13 @@ export async function fetchSSInventory(
     /\/+$/,
     "",
   );
-  // S&S's path param /products/{x} expects {x} to be a SKU (e.g. B000000001),
-  // not a style number. Query params for filtering:
-  //   ?styleID=39       — numeric internal ID
-  //   ?partnumber=DG530 — user-facing style code (what we have from Syncore)
-  // Using `style=` silently returns [] for non-numeric values, so always
-  // route partnumbers through the partnumber filter.
   const params = new URLSearchParams({
     partnumber: productId,
     mediatype: "json",
   });
-  const url = `${base}/products?${params.toString()}`;
+  // Trailing slash on /products/ is required — without it, ASP.NET routes
+  // the request to /products/{Identifier} and 404s.
+  const url = `${base}/products/?${params.toString()}`;
 
   const auth = Buffer.from(`${accountNumber}:${apiKey}`).toString("base64");
 
@@ -86,13 +87,11 @@ export async function fetchSSInventory(
       );
     }
     throw new Error(
-      `S&S /products?style=${productId} → ${res.status}: ${body || res.statusText}`,
+      `S&S /products/?partnumber=${productId} → ${res.status}: ${body || res.statusText}`,
     );
   }
 
   const data = (await res.json()) as unknown;
-  // The query endpoint returns [] for unknown styles instead of 404; treat
-  // that as "style truly absent" rather than a silent zero.
   if (Array.isArray(data) && data.length === 0) {
     throw new Error(
       `S&S returned no products for style "${productId}" — may be discontinued or the supplier on this Syncore line is incorrect.`,
