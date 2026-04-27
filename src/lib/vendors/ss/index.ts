@@ -65,6 +65,16 @@ export async function fetchSSInventory(
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    if (res.status === 404) {
+      throw new Error(
+        `S&S has no style "${productId}" — may be discontinued or the supplier on this Syncore line is incorrect.`,
+      );
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(
+        `S&S authentication failed (${res.status}). Verify SS_WS_ID is the account number and SS_WS_PASSWORD is the API key.`,
+      );
+    }
     throw new Error(
       `S&S GET /products/${productId} → ${res.status}: ${body || res.statusText}`,
     );
