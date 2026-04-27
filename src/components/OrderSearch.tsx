@@ -13,7 +13,9 @@ export function OrderSearch() {
   const [pending, startTransition] = useTransition();
 
   const placeholder =
-    mode === "job" ? "Syncore Job ID (e.g. 4991)" : "Syncore Quote ID (e.g. 5351986)";
+    mode === "job"
+      ? "Syncore Job ID (e.g. 4991)"
+      : "Syncore Quote # (e.g. 494715-172)";
 
   return (
     <div className="w-full max-w-md">
