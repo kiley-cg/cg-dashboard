@@ -19,6 +19,9 @@ export type InventoryLine = {
   msrp: number | null;
   // Per-piece price when buying a full case. Both vendors expose this.
   casePrice: number | null;
+  // Promo / sale price when one is active. Surface a badge when below
+  // yourCost. Null when not on sale.
+  salePrice: number | null;
   warehouses?: Array<{
     id: string;
     name?: string;

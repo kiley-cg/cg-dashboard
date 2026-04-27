@@ -114,6 +114,8 @@ export default async function QuotePage({ params }: Props) {
                 verification={null}
                 currentUserEmail={userEmail}
                 currentUserName={userName}
+                shipToZip={null}
+                consolidationWarehouseId={null}
               />
             ))}
           </tbody>

@@ -6,6 +6,7 @@ import {
   autoVerifyClean,
   findVerificationsForJob,
 } from "@/lib/db/verifications";
+import { pickConsolidationWarehouse } from "@/lib/vendors/warehouse-priority";
 import { LineItemRow } from "@/components/LineItemRow";
 import { Badge } from "@/components/Badge";
 
@@ -108,7 +109,40 @@ export default async function JobPage({ params }: Props) {
           </div>
         )}
 
-        {enriched.map(({ salesOrder: so, rows }) => (
+        {enriched.map(({ salesOrder: so, rows }) => {
+          // Ship-to: use the Sales Order's destination zip when present so
+          // drop-ship orders rank warehouses from the customer's location.
+          // Falls back to CG's home zip (98512) inside warehouse-priority.
+          const shipToZip =
+            (so.ship_to as { zip?: string } | undefined)?.zip ?? null;
+
+          // Multi-line consolidation: if a single warehouse can fulfill
+          // every line on this Sales Order, use it as Ships-from for every
+          // line so the rep cuts one PO instead of splitting.
+          const okRows = rows.filter((r) => r.lookup.status === "ok");
+          const consolidationWarehouseId = pickConsolidationWarehouse(
+            okRows.map(({ line, lookup }) => {
+              const matched =
+                lookup.status === "ok"
+                  ? lookup.lines.find(
+                      (l) =>
+                        (!line.color ||
+                          l.color?.toLowerCase() ===
+                            line.color.toLowerCase()) &&
+                        (!line.size ||
+                          l.size?.toLowerCase() ===
+                            line.size.toLowerCase()),
+                    )
+                  : null;
+              return {
+                qtyOrdered: line.qtyOrdered,
+                warehouses: matched?.warehouses ?? [],
+              };
+            }),
+            shipToZip,
+          );
+
+          return (
           <div
             key={so.id}
             className="bg-white border border-cg-n-200 rounded-card overflow-hidden shadow-sm"
@@ -124,6 +158,11 @@ export default async function JobPage({ params }: Props) {
                     ? ` · PO ${so.customer_order_number}`
                     : ""}
                 </p>
+                {consolidationWarehouseId && (
+                  <p className="text-cg-success text-[11px] mt-1">
+                    Consolidates to a single warehouse
+                  </p>
+                )}
               </div>
               {so.status && <Badge tone="neutral">{so.status}</Badge>}
             </div>
@@ -167,13 +206,16 @@ export default async function JobPage({ params }: Props) {
                       verification={verifications.get(key) ?? null}
                       currentUserEmail={session?.user?.email ?? null}
                       currentUserName={session?.user?.name ?? null}
+                      shipToZip={shipToZip}
+                      consolidationWarehouseId={consolidationWarehouseId}
                     />
                   );
                 })}
               </tbody>
             </table>
           </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

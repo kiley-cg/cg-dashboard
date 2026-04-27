@@ -4,6 +4,11 @@ import { useState } from "react";
 import type { FlatLineItem } from "@/lib/syncore/types";
 import type { InventoryLookup } from "@/lib/vendors/types";
 import type { VerificationDetail } from "@/lib/db/verifications";
+import {
+  computeSplit,
+  pickPrimaryWarehouse,
+  warehouseRank,
+} from "@/lib/vendors/warehouse-priority";
 import { Badge } from "./Badge";
 import { Button } from "./Button";
 
@@ -15,6 +20,12 @@ type Props = {
   verification: VerificationDetail | null;
   currentUserEmail: string | null;
   currentUserName: string | null;
+  // Destination zip used to rank warehouses (defaults to CG's home zip).
+  shipToZip: string | null;
+  // If a single warehouse can fulfill EVERY line on this Sales Order from
+  // itself (and has enough for THIS line), use it as Ships-from instead of
+  // the per-line primary. Lets multi-line orders consolidate to one PO.
+  consolidationWarehouseId: string | null;
 };
 
 function matchingLine(
@@ -29,38 +40,6 @@ function matchingLine(
       (!size || l.size?.toLowerCase() === size.toLowerCase()),
   );
   return exact ?? null;
-}
-
-// Color Graphics ships from Olympia, WA (zip 98512), so the closer-to-WA a
-// warehouse is, the better. When multiple warehouses can fulfill a line in
-// one shipment, prefer them in this order. Each entry is a list of substring
-// keywords to match against a warehouse's name OR its ID/abbreviation —
-// SanMar returns city names ("Seattle"), S&S returns state abbreviations
-// ("NV"), and the matcher handles both. Anything unmatched falls to the
-// bottom of the list.
-const WAREHOUSE_PRIORITY: ReadonlyArray<readonly string[]> = [
-  ["seattle", "wa"],                                  // SanMar Seattle
-  ["reno", "nv"],                                     // SanMar Reno + S&S NV
-  ["phoenix", "az"],                                  // SanMar Phoenix
-  ["dallas", "fort worth", "ft worth", "tx"],         // SanMar Dallas + S&S TX
-  ["olathe", "kansas", "ks"],                         // S&S KS
-  ["lockport", "illinois", "il"],                     // S&S IL
-  ["cincinnati", "ohio", "oh"],                       // SanMar Cincinnati
-  ["minneapolis", "mn"],                              // SanMar Minneapolis
-  ["atlanta", "ga"],                                  // S&S GA
-  ["richmond", "va"],                                 // SanMar Richmond
-  ["robbinsville", "cranbury", "nj"],                 // SanMar + S&S NJ
-  ["reading", "pa"],                                  // S&S PA
-  ["jacksonville", "fl"],                             // SanMar Jacksonville
-  ["middleboro", "lakeville", "ma"],                  // S&S MA
-];
-
-function warehousePriority(w: { id: string; name?: string }): number {
-  const haystack = `${w.name ?? ""} ${w.id ?? ""}`.toLowerCase();
-  for (let i = 0; i < WAREHOUSE_PRIORITY.length; i++) {
-    if (WAREHOUSE_PRIORITY[i].some((k) => haystack.includes(k))) return i;
-  }
-  return WAREHOUSE_PRIORITY.length;
 }
 
 function matchingAvailable(
@@ -84,13 +63,7 @@ function formatMoney(n: number | null): string {
   });
 }
 
-function displayName(
-  name: string | null,
-  email: string | null,
-): string {
-  // Prefer the name we got from Google. If we only have the email, take the
-  // local-part and capitalize each whitespace/dot/hyphen-separated chunk so
-  // "kiley" → "Kiley" and "kiley.green" → "Kiley Green".
+function displayName(name: string | null, email: string | null): string {
   const trimmed = name?.trim();
   if (trimmed) return trimmed;
   if (!email) return "unknown";
@@ -115,7 +88,9 @@ function formatTime(iso: string): string {
 function tooltip(v: VerificationDetail): string {
   const who = v.verifiedByName?.trim() || v.verifiedByEmail || "unknown";
   const parts = [
-    `Verified by ${who}${v.verifiedByEmail && v.verifiedByName ? ` (${v.verifiedByEmail})` : ""}`,
+    `Verified by ${who}${
+      v.verifiedByEmail && v.verifiedByName ? ` (${v.verifiedByEmail})` : ""
+    }`,
     `at ${new Date(v.verifiedAt).toLocaleString()}`,
   ];
   if (v.qtyOrdered != null && v.qtyAvailable != null) {
@@ -135,6 +110,8 @@ export function LineItemRow({
   verification,
   currentUserEmail,
   currentUserName,
+  shipToZip,
+  consolidationWarehouseId,
 }: Props) {
   const [state, setState] = useState<
     | { kind: "idle" }
@@ -150,30 +127,40 @@ export function LineItemRow({
   const available = matchingAvailable(lookup, line.color, line.size);
   const sufficient = available !== null && available >= line.qtyOrdered;
   const isPartial = available !== null && available > 0 && !sufficient;
-  const warehouses = inventoryLine?.warehouses?.filter((w) => w.quantity > 0) ?? [];
+  const warehouses =
+    inventoryLine?.warehouses?.filter((w) => w.quantity > 0) ?? [];
 
-  // "Ships from": pick the highest-priority warehouse (closest to CG in WA)
-  // that can fulfill this line in one shipment. Tie-break on quantity to
-  // avoid picking a warehouse that's exactly at the line qty over one with
-  // ample stock.
-  const singleSource =
-    line.qtyOrdered > 0
-      ? [...warehouses]
-          .filter((w) => w.quantity >= line.qtyOrdered)
-          .sort((a, b) => {
-            const pa = warehousePriority(a);
-            const pb = warehousePriority(b);
-            if (pa !== pb) return pa - pb;
-            return b.quantity - a.quantity;
-          })[0] ?? null
-      : warehouses[0] ?? null;
-  const willSplit = warehouses.length > 0 && !singleSource && available !== null && available > 0;
-  const warehousesTooltip = warehouses
+  // Step 1: if the Sales Order has a consolidation warehouse and it can
+  // fulfill THIS line from itself, route here.
+  // Step 2: otherwise, the highest-priority warehouse with enough stock.
+  // Step 3: if no single warehouse can fulfill, compute a split allocation.
+  const consolidationMatch =
+    consolidationWarehouseId
+      ? warehouses.find(
+          (w) =>
+            w.id === consolidationWarehouseId && w.quantity >= line.qtyOrdered,
+        ) ?? null
+      : null;
+  const primary =
+    consolidationMatch ??
+    pickPrimaryWarehouse(warehouses, line.qtyOrdered, shipToZip);
+  const split =
+    !primary && warehouses.length > 0 && available !== null && available > 0
+      ? computeSplit(warehouses, line.qtyOrdered, shipToZip)
+      : null;
+
+  const sortedWarehouses = [...warehouses].sort(
+    (a, b) => warehouseRank(a, shipToZip) - warehouseRank(b, shipToZip),
+  );
+  const warehousesTooltip = sortedWarehouses
     .map((w) => `${w.name ?? w.id}: ${w.quantity.toLocaleString()}`)
     .join("\n");
-  // Verify is allowed whenever SanMar returned data — even on partial or zero
-  // fills. The recorded qtyConfirmed is capped at what's actually available
-  // so the audit trail reflects fillable units, not ordered intent.
+
+  const onSale =
+    inventoryLine?.salePrice != null &&
+    inventoryLine.yourCost != null &&
+    inventoryLine.salePrice < inventoryLine.yourCost;
+
   const canVerify = lookup.status === "ok" && available !== null;
   const qtyConfirmed =
     available === null ? 0 : Math.min(line.qtyOrdered, available);
@@ -226,15 +213,17 @@ export function LineItemRow({
 
   return (
     <tr className="border-t border-cg-n-100">
-      <td className="py-3 px-4 font-mono text-sm text-cg-n-900">
+      <td className="py-3 px-4 font-mono text-sm text-cg-n-900 align-top">
         {line.sku || line.productId || (
           <span className="text-cg-n-400">—</span>
         )}
       </td>
-      <td className="py-3 px-4 text-sm text-cg-n-700">
+      <td className="py-3 px-4 text-sm text-cg-n-700 align-top">
         {line.color ?? "—"} / {line.size ?? "—"}
       </td>
-      <td className="py-3 px-4 text-right tabular-nums">{line.qtyOrdered}</td>
+      <td className="py-3 px-4 text-right tabular-nums align-top">
+        {line.qtyOrdered}
+      </td>
       <td className="py-3 px-4 text-right align-top">
         {lookup.status === "ok" ? (
           <div className="flex flex-col items-end gap-1">
@@ -247,20 +236,25 @@ export function LineItemRow({
               {isPartial && <Badge tone="warning">Partial</Badge>}
               {available === 0 && <Badge tone="danger">Out</Badge>}
             </span>
-            {singleSource && (
+            {primary && (
               <span
                 className="text-cg-n-500 text-[10px]"
                 title={warehousesTooltip}
               >
-                Ships from {singleSource.name ?? singleSource.id}
+                Ships from {primary.name ?? primary.id}
+                {consolidationMatch && " · order-wide"}
               </span>
             )}
-            {willSplit && (
+            {split && (
               <span
-                className="text-cg-warning text-[10px]"
+                className="text-cg-warning text-[10px] tabular-nums"
                 title={warehousesTooltip}
               >
-                Ships from multiple warehouses
+                Split:{" "}
+                {split.allocations
+                  .map((a) => `${a.qty} ${a.warehouse.name ?? a.warehouse.id}`)
+                  .join(" + ")}
+                {split.remaining > 0 && ` · ${split.remaining} short`}
               </span>
             )}
           </div>
@@ -309,6 +303,13 @@ export function LineItemRow({
                   {formatMoney(inventoryLine.casePrice)}
                 </span>
               </div>
+            )}
+            {onSale && (
+              <span className="inline-flex items-center gap-1 mt-0.5">
+                <Badge tone="success">
+                  Sale {formatMoney(inventoryLine.salePrice)}
+                </Badge>
+              </span>
             )}
           </div>
         ) : (

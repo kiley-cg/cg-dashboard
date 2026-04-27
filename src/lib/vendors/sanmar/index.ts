@@ -55,6 +55,7 @@ export async function fetchSanMarInventory(
     line.yourCost = match.myPrice ?? match.salePrice ?? match.piecePrice;
     line.msrp = match.piecePrice;
     line.casePrice = match.casePrice;
+    line.salePrice = match.salePrice;
   }
   return lines;
 }
