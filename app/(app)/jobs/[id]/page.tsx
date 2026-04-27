@@ -7,6 +7,7 @@ import {
   findVerificationsForJob,
 } from "@/lib/db/verifications";
 import { pickConsolidationWarehouse } from "@/lib/vendors/warehouse-priority";
+import { estimateFreight } from "@/lib/ups/freight";
 import { LineItemRow } from "@/components/LineItemRow";
 import { Badge } from "@/components/Badge";
 
@@ -109,7 +110,7 @@ export default async function JobPage({ params }: Props) {
           </div>
         )}
 
-        {enriched.map(({ salesOrder: so, rows }) => {
+        {await Promise.all(enriched.map(async ({ salesOrder: so, rows }) => {
           // Ship-to: use the Sales Order's destination zip when present so
           // drop-ship orders rank warehouses from the customer's location.
           // Falls back to CG's home zip (98512) inside warehouse-priority.
@@ -142,6 +143,30 @@ export default async function JobPage({ params }: Props) {
             shipToZip,
           );
 
+          // Per-SO freight estimate via UPS Ratetimeintransit.
+          // Only attempted when consolidation worked (one origin warehouse).
+          // Multi-warehouse splits → skipped (would need N quotes summed).
+          const consolidationWarehouse = consolidationWarehouseId
+            ? rows
+                .map((r) => {
+                  const lookup = r.lookup;
+                  if (lookup.status !== "ok") return null;
+                  return lookup.lines
+                    .flatMap((l) => l.warehouses ?? [])
+                    .find((w) => w.id === consolidationWarehouseId);
+                })
+                .find((w) => w != null) ?? null
+            : null;
+          const totalQty = okRows.reduce(
+            (n, r) => n + r.line.qtyOrdered,
+            0,
+          );
+          const freight = await estimateFreight({
+            fromWarehouse: consolidationWarehouse,
+            toZip: shipToZip,
+            totalQty,
+          });
+
           return (
           <div
             key={so.id}
@@ -163,12 +188,39 @@ export default async function JobPage({ params }: Props) {
                     Consolidates to a single warehouse
                   </p>
                 )}
-                <p
-                  className="text-cg-n-400 text-[10px] mt-1"
-                  title="Neither SanMar nor S&S exposes a pre-order freight rate API. Wiring a third-party rate provider (Shippo, EasyPost) is a separate scope."
-                >
-                  Freight cost: not available via vendor APIs
-                </p>
+                {freight.status === "ok" && (
+                  <p
+                    className="text-cg-n-700 text-[11px] mt-1 tabular-nums"
+                    title={`UPS ${freight.estimate.serviceName} · ${freight.estimate.packages} package${freight.estimate.packages === 1 ? "" : "s"} · ${freight.totalWeightLbs} lbs · ${freight.fromZip} → ${shipToZip ?? "98512"} · ${freight.estimate.isNegotiated ? "negotiated rate" : "list rate"}`}
+                  >
+                    Estimated freight:{" "}
+                    <span className="font-semibold">
+                      {freight.estimate.totalCharge.toLocaleString("en-US", {
+                        style: "currency",
+                        currency: freight.estimate.currency,
+                      })}
+                    </span>{" "}
+                    {freight.estimate.serviceName}
+                    {freight.estimate.transitDays != null
+                      ? ` · ~${freight.estimate.transitDays}-day transit`
+                      : ""}
+                    {" · "}
+                    {freight.totalWeightLbs} lbs
+                  </p>
+                )}
+                {freight.status === "skipped" && (
+                  <p className="text-cg-n-400 text-[10px] mt-1">
+                    Freight estimate: {freight.reason}
+                  </p>
+                )}
+                {freight.status === "error" && (
+                  <p
+                    className="text-cg-danger text-[10px] mt-1"
+                    title={freight.message}
+                  >
+                    Freight estimate failed (hover for details)
+                  </p>
+                )}
               </div>
               {so.status && <Badge tone="neutral">{so.status}</Badge>}
             </div>
@@ -221,7 +273,7 @@ export default async function JobPage({ params }: Props) {
             </table>
           </div>
           );
-        })}
+        }))}
       </div>
     </section>
   );
