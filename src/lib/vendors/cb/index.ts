@@ -57,15 +57,18 @@ export async function fetchCutterBuckInventory(
     })) as [unknown];
   } catch (err) {
     // C&B's .NET service throws "Object reference not set" with no detail
-    // about which field is null. Log the exact SOAP envelope we sent so we
-    // can compare it against their docs sample and find the missing field.
+    // about which field is null. Inline the outgoing SOAP body into the
+    // error message so it surfaces in the registry's existing failure log,
+    // then we can compare it against their docs sample to pin down the
+    // missing/misnamed field.
     const lastRequest = (client as unknown as { lastRequest?: string })
       .lastRequest;
-    console.error("[cb] getInventoryLevels failed", {
-      productId,
-      lastRequest,
-    });
-    throw err;
+    const baseMessage = err instanceof Error ? err.message : String(err);
+    const wrapped = new Error(
+      `${baseMessage}\n--- C&B request body ---\n${lastRequest ?? "(unavailable)"}`,
+    );
+    if (err instanceof Error && err.stack) wrapped.stack = err.stack;
+    throw wrapped;
   }
 
   return mapCutterBuckInventory(response);
