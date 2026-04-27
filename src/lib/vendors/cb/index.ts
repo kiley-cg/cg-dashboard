@@ -43,16 +43,30 @@ export async function fetchCutterBuckInventory(
   // (standard PromoStandards lowercase) — the WSDL serializer drops
   // whichever the schema doesn't declare.
   const client = await getClient();
-  const [response] = (await client.getInventoryLevelsAsync({
-    wsVersion: "1.2.1",
-    id,
-    password,
-    productID: productId,
-    productId,
-    productIDtype: "Distributor",
-    localizationCountry: "US",
-    localizationLanguage: "en",
-  })) as [unknown];
+  let response: unknown;
+  try {
+    [response] = (await client.getInventoryLevelsAsync({
+      wsVersion: "1.2.1",
+      id,
+      password,
+      productID: productId,
+      productId,
+      productIDtype: "Distributor",
+      localizationCountry: "US",
+      localizationLanguage: "en",
+    })) as [unknown];
+  } catch (err) {
+    // C&B's .NET service throws "Object reference not set" with no detail
+    // about which field is null. Log the exact SOAP envelope we sent so we
+    // can compare it against their docs sample and find the missing field.
+    const lastRequest = (client as unknown as { lastRequest?: string })
+      .lastRequest;
+    console.error("[cb] getInventoryLevels failed", {
+      productId,
+      lastRequest,
+    });
+    throw err;
+  }
 
   return mapCutterBuckInventory(response);
 }
