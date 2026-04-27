@@ -51,7 +51,15 @@ export async function fetchSSInventory(
     /\/+$/,
     "",
   );
-  const url = `${base}/products/${encodeURIComponent(productId)}?mediatype=json`;
+  // S&S's path param /products/{x} expects {x} to be a SKU (e.g. B000000001).
+  // Style numbers / partnumbers (e.g. DG530, JST50) must be passed as a
+  // query parameter — otherwise the API returns 404 because it's looking up
+  // "is this a SKU?" and finding nothing.
+  const params = new URLSearchParams({
+    style: productId,
+    mediatype: "json",
+  });
+  const url = `${base}/products?${params.toString()}`;
 
   const auth = Buffer.from(`${accountNumber}:${apiKey}`).toString("base64");
 
@@ -76,11 +84,18 @@ export async function fetchSSInventory(
       );
     }
     throw new Error(
-      `S&S GET /products/${productId} → ${res.status}: ${body || res.statusText}`,
+      `S&S /products?style=${productId} → ${res.status}: ${body || res.statusText}`,
     );
   }
 
   const data = (await res.json()) as unknown;
+  // The query endpoint returns [] for unknown styles instead of 404; treat
+  // that as "style truly absent" rather than a silent zero.
+  if (Array.isArray(data) && data.length === 0) {
+    throw new Error(
+      `S&S returned no products for style "${productId}" — may be discontinued or the supplier on this Syncore line is incorrect.`,
+    );
+  }
   return mapSSProducts(data);
 }
 
