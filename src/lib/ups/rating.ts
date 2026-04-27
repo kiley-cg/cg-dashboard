@@ -30,25 +30,39 @@ function splitIntoPackages(totalLbs: number): number {
   return Math.max(1, Math.ceil(totalLbs / MAX_PACKAGE_LBS));
 }
 
+type UpsRatedShipment = {
+  Service?: { Code?: string; Description?: string };
+  TotalCharges?: { MonetaryValue?: string; CurrencyCode?: string };
+  NegotiatedRateCharges?: {
+    TotalCharge?: { MonetaryValue?: string; CurrencyCode?: string };
+  };
+  TimeInTransit?: {
+    ServiceSummary?: {
+      EstimatedArrival?: { BusinessDaysInTransit?: string };
+    };
+  };
+};
+
 type UpsRateResponse = {
   RateResponse?: {
-    RatedShipment?: {
-      Service?: { Code?: string; Description?: string };
-      TotalCharges?: { MonetaryValue?: string; CurrencyCode?: string };
-      NegotiatedRateCharges?: {
-        TotalCharge?: { MonetaryValue?: string; CurrencyCode?: string };
-      };
-      TimeInTransit?: {
-        ServiceSummary?: {
-          EstimatedArrival?: { BusinessDaysInTransit?: string };
-        };
-      };
-    };
+    // RatedShipment is an object for Rate (single service) and an array for
+    // Shop. Ratetimeintransit can return either depending on whether the
+    // server filtered to one service — handle both shapes.
+    RatedShipment?: UpsRatedShipment | UpsRatedShipment[];
   };
   response?: {
     errors?: Array<{ code?: string; message?: string }>;
   };
 };
+
+function pickGroundShipment(
+  rated: UpsRatedShipment | UpsRatedShipment[] | undefined,
+): UpsRatedShipment | null {
+  if (!rated) return null;
+  if (!Array.isArray(rated)) return rated;
+  // Prefer the Ground service when present; fall back to the first entry.
+  return rated.find((s) => s.Service?.Code === "03") ?? rated[0] ?? null;
+}
 
 export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> {
   const token = await getUpsToken();
@@ -145,7 +159,7 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
   }
 
   const data = (await res.json()) as UpsRateResponse;
-  const rated = data.RateResponse?.RatedShipment;
+  const rated = pickGroundShipment(data.RateResponse?.RatedShipment);
   if (!rated) {
     const err = data.response?.errors?.[0];
     throw new Error(
@@ -164,6 +178,16 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
   const transitStr =
     rated.TimeInTransit?.ServiceSummary?.EstimatedArrival?.BusinessDaysInTransit;
   const parsedTransit = transitStr != null ? Number(transitStr) : NaN;
+
+  // If we parsed nothing useful, log the response so we can diagnose what
+  // shape UPS actually returned (paths vary by request option / account).
+  if (totalCharge === 0 && !Number.isFinite(parsedTransit)) {
+    console.error("[ups] rating returned but parsed empty", {
+      fromZip: input.fromZip,
+      toZip: input.toZip,
+      response: JSON.stringify(data).slice(0, 4000),
+    });
+  }
 
   return {
     carrier: "UPS",
