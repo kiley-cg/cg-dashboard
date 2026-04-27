@@ -31,6 +31,30 @@ function matchingLine(
   return exact ?? null;
 }
 
+// Color Graphics is based in Washington, so the closer-to-WA a warehouse is,
+// the better. When multiple warehouses can fulfill a line in one shipment,
+// we prefer them in this order. Each entry is a list of substring keywords
+// to match against a warehouse's name or ID/abbreviation. Anything unmatched
+// goes to the bottom of the priority list.
+const WAREHOUSE_PRIORITY: ReadonlyArray<readonly string[]> = [
+  ["seattle", "wa"],
+  ["reno", "nv"],
+  ["phoenix", "az"],
+  ["dallas", "tx"],
+  ["cincinnati", "ohio", "oh"],
+  ["richmond", "va"],
+  ["robbinsville", "nj"],
+  ["jacksonville", "fl"],
+];
+
+function warehousePriority(w: { id: string; name?: string }): number {
+  const haystack = `${w.name ?? ""} ${w.id ?? ""}`.toLowerCase();
+  for (let i = 0; i < WAREHOUSE_PRIORITY.length; i++) {
+    if (WAREHOUSE_PRIORITY[i].some((k) => haystack.includes(k))) return i;
+  }
+  return WAREHOUSE_PRIORITY.length;
+}
+
 function matchingAvailable(
   lookup: InventoryLookup,
   color: string | null,
@@ -120,16 +144,20 @@ export function LineItemRow({
   const isPartial = available !== null && available > 0 && !sufficient;
   const warehouses = inventoryLine?.warehouses?.filter((w) => w.quantity > 0) ?? [];
 
-  // "Ships from": the single warehouse most likely to fulfill this line.
-  // Vendor freight optimizers pick the closest warehouse with enough stock,
-  // so without ship-to context our best heuristic is the warehouse with the
-  // largest qty that can satisfy the ordered quantity by itself. If none
-  // can, the order will split across warehouses.
+  // "Ships from": pick the highest-priority warehouse (closest to CG in WA)
+  // that can fulfill this line in one shipment. Tie-break on quantity to
+  // avoid picking a warehouse that's exactly at the line qty over one with
+  // ample stock.
   const singleSource =
     line.qtyOrdered > 0
       ? [...warehouses]
           .filter((w) => w.quantity >= line.qtyOrdered)
-          .sort((a, b) => b.quantity - a.quantity)[0] ?? null
+          .sort((a, b) => {
+            const pa = warehousePriority(a);
+            const pb = warehousePriority(b);
+            if (pa !== pb) return pa - pb;
+            return b.quantity - a.quantity;
+          })[0] ?? null
       : warehouses[0] ?? null;
   const willSplit = warehouses.length > 0 && !singleSource && available !== null && available > 0;
   const warehousesTooltip = warehouses
