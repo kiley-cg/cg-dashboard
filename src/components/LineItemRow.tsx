@@ -11,6 +11,7 @@ type Props = {
   salesOrderId: number;
   line: FlatLineItem;
   lookup: InventoryLookup;
+  preVerified?: boolean;
 };
 
 function matchingAvailable(
@@ -28,13 +29,19 @@ function matchingAvailable(
   return lookup.lines.reduce((n, l) => n + l.quantityAvailable, 0);
 }
 
-export function LineItemRow({ jobId, salesOrderId, line, lookup }: Props) {
+export function LineItemRow({
+  jobId,
+  salesOrderId,
+  line,
+  lookup,
+  preVerified = false,
+}: Props) {
   const [state, setState] = useState<
     | { kind: "idle" }
     | { kind: "saving" }
     | { kind: "ok" }
     | { kind: "error"; message: string }
-  >({ kind: "idle" });
+  >(preVerified ? { kind: "ok" } : { kind: "idle" });
 
   const available = matchingAvailable(lookup, line.color, line.size);
   const sufficient = available !== null && available >= line.qtyOrdered;
