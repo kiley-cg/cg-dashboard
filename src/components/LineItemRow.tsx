@@ -247,7 +247,8 @@ export function LineItemRow({
                   const days = transitDays(primary, shipToZip);
                   return days != null ? ` · ~${days}-day Ground` : "";
                 })()}
-                {consolidationMatch && " · order-wide"}
+                {warehouses.length > 0 &&
+                  ` · 1 of ${warehouses.length} warehouse${warehouses.length === 1 ? "" : "s"}`}
               </span>
             )}
             {split && (
@@ -259,6 +260,8 @@ export function LineItemRow({
                 {split.allocations
                   .map((a) => `${a.qty} ${a.warehouse.name ?? a.warehouse.id}`)
                   .join(" + ")}
+                {warehouses.length > 0 &&
+                  ` · ${split.allocations.length} of ${warehouses.length} warehouses`}
                 {split.remaining > 0 && ` · ${split.remaining} short`}
               </span>
             )}
