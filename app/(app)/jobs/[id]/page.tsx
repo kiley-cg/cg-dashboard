@@ -139,6 +139,7 @@ export default async function JobPage({ params }: Props) {
                   <th className="py-3 px-4 text-right font-semibold">
                     Available
                   </th>
+                  <th className="py-3 px-4 text-right font-semibold">Cost</th>
                   <th className="py-3 px-4 text-right font-semibold"></th>
                 </tr>
               </thead>
@@ -146,7 +147,7 @@ export default async function JobPage({ params }: Props) {
                 {rows.length === 0 && (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="py-8 px-4 text-center text-cg-n-500 text-sm"
                     >
                       No orderable color/size lines found on this sales

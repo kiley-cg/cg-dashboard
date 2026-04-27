@@ -69,6 +69,11 @@ export function mapPromoStandardsInventory(raw: unknown): InventoryLine[] {
       color: p.partColor ?? null,
       size: p.labelSize ?? null,
       quantityAvailable: readQty(p.quantityAvailable),
+      // Pricing isn't part of the PromoStandards Inventory response —
+      // it comes from the separate Pricing service. The vendor wrapper
+      // is responsible for merging it in if available.
+      yourCost: null,
+      casePrice: null,
       warehouses: warehouses.length ? warehouses : undefined,
       asOf,
     };

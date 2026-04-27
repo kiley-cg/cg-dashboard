@@ -11,6 +11,11 @@ export type InventoryLine = {
   color: string | null;
   size: string | null;
   quantityAvailable: number;
+  // Contracted / customer-specific price per piece. SanMar = "mySpecialPrice",
+  // S&S = "yourPrice". Null when the vendor didn't return one.
+  yourCost: number | null;
+  // Per-piece price when buying a full case. Both vendors expose this.
+  casePrice: number | null;
   warehouses?: Array<{
     id: string;
     name?: string;

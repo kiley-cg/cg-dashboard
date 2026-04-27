@@ -36,6 +36,12 @@ type SSProduct = {
   sizeName?: string;
   size?: string;
   color?: string;
+  // Pricing fields included on /v2/products/?style= responses.
+  yourPrice?: number | string;
+  piecePrice?: number | string;
+  casePrice?: number | string;
+  salePrice?: number | string;
+  customerPrice?: number | string;
   warehouses?: SSWarehouse[];
 };
 
@@ -54,6 +60,15 @@ function toNum(v: unknown): number {
     return Number.isFinite(n) ? n : 0;
   }
   return 0;
+}
+
+function toPrice(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
 }
 
 function basicAuthHeader(accountNumber: string, apiKey: string): string {
@@ -182,6 +197,14 @@ function mapSSProducts(raw: unknown): InventoryLine[] {
       color: p.colorName ?? p.color ?? null,
       size: p.sizeName ?? p.size ?? null,
       quantityAvailable: toNum(p.qty),
+      // S&S returns multiple price fields per SKU; prefer the contracted
+      // yourPrice, fall back to customerPrice, then sale, then piece.
+      yourCost:
+        toPrice(p.yourPrice) ??
+        toPrice(p.customerPrice) ??
+        toPrice(p.salePrice) ??
+        toPrice(p.piecePrice),
+      casePrice: toPrice(p.casePrice),
       warehouses: warehouses.length ? warehouses : undefined,
       asOf,
     };

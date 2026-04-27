@@ -17,19 +17,39 @@ type Props = {
   currentUserName: string | null;
 };
 
-function matchingAvailable(
+function matchingLine(
   lookup: InventoryLookup,
   color: string | null,
   size: string | null,
-): number | null {
+) {
   if (lookup.status !== "ok") return null;
   const exact = lookup.lines.find(
     (l) =>
       (!color || l.color?.toLowerCase() === color.toLowerCase()) &&
       (!size || l.size?.toLowerCase() === size.toLowerCase()),
   );
+  return exact ?? null;
+}
+
+function matchingAvailable(
+  lookup: InventoryLookup,
+  color: string | null,
+  size: string | null,
+): number | null {
+  if (lookup.status !== "ok") return null;
+  const exact = matchingLine(lookup, color, size);
   if (exact) return exact.quantityAvailable;
   return lookup.lines.reduce((n, l) => n + l.quantityAvailable, 0);
+}
+
+function formatMoney(n: number | null): string {
+  if (n == null) return "—";
+  return n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function displayName(
@@ -68,7 +88,7 @@ function tooltip(v: VerificationDetail): string {
   ];
   if (v.qtyOrdered != null && v.qtyAvailable != null) {
     parts.push(
-      `Confirmed ${v.qtyConfirmed} of ${v.qtyOrdered} ordered (SanMar had ${v.qtyAvailable} available at the time)`,
+      `Confirmed ${v.qtyConfirmed} of ${v.qtyOrdered} ordered (vendor had ${v.qtyAvailable} available at the time)`,
     );
   }
   if (v.note) parts.push(v.note);
@@ -91,9 +111,14 @@ export function LineItemRow({
     | { kind: "error"; message: string }
   >(verification ? { kind: "ok", verification } : { kind: "idle" });
 
+  const inventoryLine =
+    lookup.status === "ok"
+      ? matchingLine(lookup, line.color, line.size)
+      : null;
   const available = matchingAvailable(lookup, line.color, line.size);
   const sufficient = available !== null && available >= line.qtyOrdered;
   const isPartial = available !== null && available > 0 && !sufficient;
+  const warehouses = inventoryLine?.warehouses?.filter((w) => w.quantity > 0) ?? [];
   // Verify is allowed whenever SanMar returned data — even on partial or zero
   // fills. The recorded qtyConfirmed is capped at what's actually available
   // so the audit trail reflects fillable units, not ordered intent.
@@ -158,17 +183,31 @@ export function LineItemRow({
         {line.color ?? "—"} / {line.size ?? "—"}
       </td>
       <td className="py-3 px-4 text-right tabular-nums">{line.qtyOrdered}</td>
-      <td className="py-3 px-4 text-right">
+      <td className="py-3 px-4 text-right align-top">
         {lookup.status === "ok" ? (
-          <span className="inline-flex items-center gap-2 justify-end">
-            <span
-              className={`tabular-nums ${sufficient ? "text-cg-n-900" : "text-cg-danger font-semibold"}`}
-            >
-              {available ?? 0}
+          <div className="flex flex-col items-end gap-1">
+            <span className="inline-flex items-center gap-2 justify-end">
+              <span
+                className={`tabular-nums ${sufficient ? "text-cg-n-900" : "text-cg-danger font-semibold"}`}
+              >
+                {available ?? 0}
+              </span>
+              {isPartial && <Badge tone="warning">Partial</Badge>}
+              {available === 0 && <Badge tone="danger">Out</Badge>}
             </span>
-            {isPartial && <Badge tone="warning">Partial</Badge>}
-            {available === 0 && <Badge tone="danger">Out</Badge>}
-          </span>
+            {warehouses.length > 0 && (
+              <span
+                className="text-cg-n-500 text-[10px] tabular-nums"
+                title={warehouses
+                  .map((w) => `${w.name ?? w.id}: ${w.quantity}`)
+                  .join("\n")}
+              >
+                {warehouses
+                  .map((w) => `${w.id} ${w.quantity.toLocaleString()}`)
+                  .join(" · ")}
+              </span>
+            )}
+          </div>
         ) : lookup.status === "vendor-error" ? (
           <div className="flex flex-col items-end gap-1">
             <Badge tone="danger">Vendor error</Badge>
@@ -184,7 +223,21 @@ export function LineItemRow({
           <Badge tone="neutral">Unsupported</Badge>
         )}
       </td>
-      <td className="py-3 px-4 text-right">
+      <td className="py-3 px-4 text-right tabular-nums align-top">
+        {inventoryLine ? (
+          <span className="text-cg-n-900">
+            {formatMoney(inventoryLine.yourCost)}
+            {inventoryLine.casePrice != null && (
+              <span className="text-cg-n-500 ml-1">
+                ({formatMoney(inventoryLine.casePrice)})
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="text-cg-n-400">—</span>
+        )}
+      </td>
+      <td className="py-3 px-4 text-right align-top">
         {state.kind === "ok" ? (
           <div
             className="flex flex-col items-end gap-0.5"

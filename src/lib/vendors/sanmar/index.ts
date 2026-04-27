@@ -1,9 +1,18 @@
 import { getInventoryLevels } from "../promostandards/inventory";
 import { mapPromoStandardsInventory } from "../promostandards/map";
 import type { InventoryLine } from "../types";
+import { fetchSanMarPricing, type SanMarPriceRow } from "./pricing";
 
 const DEFAULT_WSDL =
   "https://ws.sanmar.com:8080/promostandards/InventoryServiceBindingV2final?WSDL";
+
+function norm(s: string | null | undefined): string {
+  return (s ?? "").trim().toLowerCase();
+}
+
+function priceKey(color: string | null, size: string | null): string {
+  return `${norm(color)}|${norm(size)}`;
+}
 
 export async function fetchSanMarInventory(
   productId: string,
@@ -13,11 +22,38 @@ export async function fetchSanMarInventory(
   if (!id || !password) {
     throw new Error("SANMAR_WS_ID and SANMAR_WS_PASSWORD must be set");
   }
-  const raw = await getInventoryLevels({
-    wsdlUrl: process.env.SANMAR_WSDL_URL ?? DEFAULT_WSDL,
-    id,
-    password,
-    productId,
-  });
-  return mapPromoStandardsInventory(raw);
+
+  // Inventory and pricing run in parallel. Pricing is optional — if
+  // SANMAR_CUSTOMER_NUMBER isn't configured, pricing comes back as []
+  // and rows render without cost. Pricing failures are logged but
+  // never block the inventory result.
+  const [raw, prices] = await Promise.all([
+    getInventoryLevels({
+      wsdlUrl: process.env.SANMAR_WSDL_URL ?? DEFAULT_WSDL,
+      id,
+      password,
+      productId,
+    }),
+    fetchSanMarPricing(productId).catch((err) => {
+      console.error("[sanmar] pricing fetch failed", {
+        productId,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return [] as SanMarPriceRow[];
+    }),
+  ]);
+
+  const lines = mapPromoStandardsInventory(raw);
+  if (prices.length === 0) return lines;
+
+  const priceByKey = new Map<string, SanMarPriceRow>();
+  for (const p of prices) priceByKey.set(priceKey(p.color, p.size), p);
+
+  for (const line of lines) {
+    const match = priceByKey.get(priceKey(line.color, line.size));
+    if (!match) continue;
+    line.yourCost = match.myPrice ?? match.salePrice ?? match.piecePrice;
+    line.casePrice = match.casePrice;
+  }
+  return lines;
 }
