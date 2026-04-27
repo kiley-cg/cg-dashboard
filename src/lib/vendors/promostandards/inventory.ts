@@ -7,13 +7,17 @@ import * as soap from "soap";
 const clientCache = new Map<string, Promise<soap.Client>>();
 
 async function getClient(wsdlUrl: string): Promise<soap.Client> {
-  let pending = clientCache.get(wsdlUrl);
+  // Trim defensively — env-var values pasted from docs sometimes carry a
+  // leading tab/space, and the soap library treats anything not starting
+  // with http(s):// as a local file path (yields ENOENT).
+  const url = wsdlUrl.trim();
+  let pending = clientCache.get(url);
   if (!pending) {
-    pending = soap.createClientAsync(wsdlUrl).catch((err) => {
-      clientCache.delete(wsdlUrl);
+    pending = soap.createClientAsync(url).catch((err) => {
+      clientCache.delete(url);
       throw err;
     });
-    clientCache.set(wsdlUrl, pending);
+    clientCache.set(url, pending);
   }
   return pending;
 }
