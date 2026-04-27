@@ -14,6 +14,7 @@ type Props = {
   lookup: InventoryLookup;
   verification: VerificationDetail | null;
   currentUserEmail: string | null;
+  currentUserName: string | null;
 };
 
 function matchingAvailable(
@@ -31,9 +32,22 @@ function matchingAvailable(
   return lookup.lines.reduce((n, l) => n + l.quantityAvailable, 0);
 }
 
-function shortName(email: string | null): string {
+function displayName(
+  name: string | null,
+  email: string | null,
+): string {
+  // Prefer the name we got from Google. If we only have the email, take the
+  // local-part and capitalize each whitespace/dot/hyphen-separated chunk so
+  // "kiley" → "Kiley" and "kiley.green" → "Kiley Green".
+  const trimmed = name?.trim();
+  if (trimmed) return trimmed;
   if (!email) return "unknown";
-  return email.split("@")[0] ?? email;
+  const local = email.split("@")[0] ?? email;
+  return local
+    .split(/[._\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function formatTime(iso: string): string {
@@ -47,8 +61,9 @@ function formatTime(iso: string): string {
 }
 
 function tooltip(v: VerificationDetail): string {
+  const who = v.verifiedByName?.trim() || v.verifiedByEmail || "unknown";
   const parts = [
-    `Verified by ${v.verifiedByEmail ?? "unknown"}`,
+    `Verified by ${who}${v.verifiedByEmail && v.verifiedByName ? ` (${v.verifiedByEmail})` : ""}`,
     `at ${new Date(v.verifiedAt).toLocaleString()}`,
   ];
   if (v.qtyOrdered != null && v.qtyAvailable != null) {
@@ -67,6 +82,7 @@ export function LineItemRow({
   lookup,
   verification,
   currentUserEmail,
+  currentUserName,
 }: Props) {
   const [state, setState] = useState<
     | { kind: "idle" }
@@ -111,6 +127,7 @@ export function LineItemRow({
         verification: {
           verifiedAt: new Date().toISOString(),
           verifiedByEmail: currentUserEmail,
+          verifiedByName: currentUserName,
           qtyOrdered: line.qtyOrdered,
           qtyAvailable: available,
           qtyConfirmed,
@@ -175,8 +192,12 @@ export function LineItemRow({
           >
             <Badge tone="success">Verified</Badge>
             <span className="text-cg-n-500 text-[10px] tabular-nums">
-              by {shortName(state.verification.verifiedByEmail)} ·{" "}
-              {formatTime(state.verification.verifiedAt)}
+              by{" "}
+              {displayName(
+                state.verification.verifiedByName,
+                state.verification.verifiedByEmail,
+              )}{" "}
+              · {formatTime(state.verification.verifiedAt)}
             </span>
           </div>
         ) : (

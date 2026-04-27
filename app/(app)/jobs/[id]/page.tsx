@@ -65,6 +65,7 @@ export default async function JobPage({ params }: Props) {
       jobId: id,
       userId,
       userEmail: session?.user?.email ?? null,
+      userName: session?.user?.name ?? null,
       alreadyVerified: existing,
       salesOrders: enriched.map((e) => ({
         salesOrderId: e.salesOrder.id,
@@ -164,6 +165,7 @@ export default async function JobPage({ params }: Props) {
                       lookup={lookup}
                       verification={verifications.get(key) ?? null}
                       currentUserEmail={session?.user?.email ?? null}
+                      currentUserName={session?.user?.name ?? null}
                     />
                   );
                 })}

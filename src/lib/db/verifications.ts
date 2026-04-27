@@ -6,6 +6,7 @@ import type { InventoryLookup } from "@/lib/vendors/types";
 export type VerificationDetail = {
   verifiedAt: string; // ISO string — keeps the server/client boundary clean
   verifiedByEmail: string | null;
+  verifiedByName: string | null;
   qtyOrdered: number | null;
   qtyAvailable: number | null;
   qtyConfirmed: number;
@@ -30,6 +31,7 @@ export async function findVerificationsForJob(
       qtyConfirmed: schema.verifications.qtyConfirmed,
       note: schema.verifications.note,
       email: schema.users.email,
+      name: schema.users.name,
     })
     .from(schema.verifications)
     .leftJoin(
@@ -47,6 +49,7 @@ export async function findVerificationsForJob(
     found.set(key, {
       verifiedAt: r.verifiedAt.toISOString(),
       verifiedByEmail: r.email,
+      verifiedByName: r.name,
       qtyOrdered: r.qtyOrdered,
       qtyAvailable: r.qtyAvailable,
       qtyConfirmed: r.qtyConfirmed,
@@ -70,13 +73,15 @@ export async function autoVerifyClean(args: {
   jobId: string;
   userId: string;
   userEmail: string | null;
+  userName: string | null;
   salesOrders: Array<{
     salesOrderId: number;
     rows: Array<{ line: FlatLineItem; lookup: InventoryLookup }>;
   }>;
   alreadyVerified: Map<string, VerificationDetail>;
 }): Promise<Map<string, VerificationDetail>> {
-  const { jobId, userId, userEmail, salesOrders, alreadyVerified } = args;
+  const { jobId, userId, userEmail, userName, salesOrders, alreadyVerified } =
+    args;
   const result = new Map(alreadyVerified);
 
   const toInsert: Array<{
@@ -130,6 +135,7 @@ export async function autoVerifyClean(args: {
         result.set(t.key, {
           verifiedAt: now,
           verifiedByEmail: userEmail,
+          verifiedByName: userName,
           qtyOrdered: t.row.qtyOrdered ?? null,
           qtyAvailable: t.row.qtyAvailable ?? null,
           qtyConfirmed: t.row.qtyConfirmed,
