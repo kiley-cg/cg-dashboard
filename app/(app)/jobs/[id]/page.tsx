@@ -157,14 +157,29 @@ export default async function JobPage({ params }: Props) {
                 })
                 .find((w) => w != null) ?? null
             : null;
-          const totalQty = okRows.reduce(
-            (n, r) => n + r.line.qtyOrdered,
-            0,
-          );
+          // Build per-line weight inputs by pairing each FlatLineItem with its
+          // matching inventory entry (same color/size match used elsewhere)
+          // so the freight estimate uses real per-piece weights.
+          const freightLines = okRows.map(({ line, lookup }) => {
+            const matched =
+              lookup.status === "ok"
+                ? lookup.lines.find(
+                    (l) =>
+                      (!line.color ||
+                        l.color?.toLowerCase() === line.color.toLowerCase()) &&
+                      (!line.size ||
+                        l.size?.toLowerCase() === line.size.toLowerCase()),
+                  )
+                : null;
+            return {
+              qtyOrdered: line.qtyOrdered,
+              pieceWeightLbs: matched?.pieceWeightLbs ?? null,
+            };
+          });
           const freight = await estimateFreight({
             fromWarehouse: consolidationWarehouse,
             toZip: shipToZip,
-            totalQty,
+            lines: freightLines,
           });
 
           return (
@@ -194,15 +209,16 @@ export default async function JobPage({ params }: Props) {
                     title={[
                       `UPS ${freight.estimate.serviceName}  ·  ${freight.estimate.isNegotiated ? "negotiated rate" : "list rate"}`,
                       `From: ${freight.fromZip}  →  To: ${freight.toZip}`,
-                      `Quantity: ${freight.totalQty.toLocaleString()} pieces`,
-                      `Weight: ${freight.totalQty.toLocaleString()} × ${freight.perPieceWeightLbs} lb/piece = ${freight.totalWeightLbs} lbs total`,
-                      `Packages: ${freight.estimate.packages} (≤70 lb each, 24×16×16 in default)`,
+                      `Quantity: ${freight.weight.totalQty.toLocaleString()} pieces across ${freight.weight.totalLines} line${freight.weight.totalLines === 1 ? "" : "s"}`,
+                      `Avg piece weight: ${freight.weight.avgPieceWeightLbs.toFixed(2)} lbs (${freight.weight.linesWithRealWeight} of ${freight.weight.totalLines} line${freight.weight.totalLines === 1 ? "" : "s"} from real vendor data, rest default 0.5 lb)`,
+                      `Total weight: ${freight.weight.totalWeightLbs} lbs`,
+                      `Packages: ${freight.estimate.packages} (≤70 lb each, 24×16×16 in default dims)`,
                       freight.estimate.transitDays != null
                         ? `Transit: ${freight.estimate.transitDays} business day${freight.estimate.transitDays === 1 ? "" : "s"}`
                         : "Transit: not returned",
                       `Total: ${freight.estimate.totalCharge.toLocaleString("en-US", { style: "currency", currency: freight.estimate.currency })}`,
                       "",
-                      "Per-piece weight is a 0.5 lb default; refine when SKU weights are wired in.",
+                      "Box dimensions still use a default; precise dims would require an extra SanMar API call per style.",
                     ].join("\n")}
                   >
                     Estimated freight:{" "}
@@ -217,7 +233,7 @@ export default async function JobPage({ params }: Props) {
                       ? ` · ~${freight.estimate.transitDays}-day transit`
                       : ""}
                     {" · "}
-                    {freight.totalWeightLbs} lbs
+                    {freight.weight.totalWeightLbs} lbs
                     {" · "}
                     <span className="text-cg-n-500">hover for details</span>
                   </p>

@@ -22,6 +22,10 @@ export type InventoryLine = {
   // Promo / sale price when one is active. Surface a badge when below
   // yourCost. Null when not on sale.
   salePrice: number | null;
+  // Per-piece weight in pounds. SanMar = `pieceWeight` from the standard
+  // product info service; S&S = `weight` from /v2/products/. Used to
+  // compute accurate freight totals; null falls back to a default.
+  pieceWeightLbs: number | null;
   warehouses?: Array<{
     id: string;
     name?: string;

@@ -76,6 +76,7 @@ export function mapPromoStandardsInventory(raw: unknown): InventoryLine[] {
       msrp: null,
       casePrice: null,
       salePrice: null,
+      pieceWeightLbs: null,
       warehouses: warehouses.length ? warehouses : undefined,
       asOf,
     };

@@ -42,6 +42,9 @@ type SSProduct = {
   casePrice?: number | string;
   salePrice?: number | string;
   customerPrice?: number | string;
+  // Per-piece weight in pounds (S&S returns this directly per SKU).
+  weight?: number | string;
+  pieceWeight?: number | string;
   warehouses?: SSWarehouse[];
 };
 
@@ -207,6 +210,7 @@ function mapSSProducts(raw: unknown): InventoryLine[] {
       msrp: toPrice(p.piecePrice),
       casePrice: toPrice(p.casePrice),
       salePrice: toPrice(p.salePrice),
+      pieceWeightLbs: toPrice(p.weight) ?? toPrice(p.pieceWeight),
       warehouses: warehouses.length ? warehouses : undefined,
       asOf,
     };
