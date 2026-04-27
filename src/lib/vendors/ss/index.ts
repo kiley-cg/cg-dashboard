@@ -7,8 +7,13 @@ import type { InventoryLine } from "../types";
 // account number (id) and the integration password issued by S&S — distinct
 // from the ssactivewear.com website login. Set SS_WS_ID and SS_WS_PASSWORD
 // in Vercel env vars.
+//
+// `?singleWsdl` (WCF feature) returns the WSDL with all <xsd:import/>'d
+// schemas inlined into one document. node-soap doesn't reliably follow
+// those imports otherwise, leading to "Cannot read properties of undefined
+// (reading 'description')" inside its WSDL parser.
 const DEFAULT_WSDL =
-  "https://promostandards.ssactivewear.com/Inventory/v2/InventoryService.svc?wsdl";
+  "https://promostandards.ssactivewear.com/Inventory/v2/InventoryService.svc?singleWsdl";
 
 export async function fetchSSInventory(
   productId: string,
