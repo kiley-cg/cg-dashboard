@@ -6,8 +6,8 @@ import {
   autoVerifyClean,
   findVerificationsForJob,
 } from "@/lib/db/verifications";
-import { pickConsolidationWarehouse } from "@/lib/vendors/warehouse-priority";
-import { estimateFreight } from "@/lib/ups/freight";
+import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit } from "@/lib/vendors/warehouse-priority";
+import { estimateFreight, type FreightShipmentInput } from "@/lib/ups/freight";
 import { LineItemRow } from "@/components/LineItemRow";
 import { Badge } from "@/components/Badge";
 
@@ -157,29 +157,93 @@ export default async function JobPage({ params }: Props) {
                 })
                 .find((w) => w != null) ?? null
             : null;
-          // Build per-line weight inputs by pairing each FlatLineItem with its
-          // matching inventory entry (same color/size match used elsewhere)
-          // so the freight estimate uses real per-piece weights.
-          const freightLines = okRows.map(({ line, lookup }) => {
-            const matched =
-              lookup.status === "ok"
-                ? lookup.lines.find(
-                    (l) =>
-                      (!line.color ||
-                        l.color?.toLowerCase() === line.color.toLowerCase()) &&
-                      (!line.size ||
-                        l.size?.toLowerCase() === line.size.toLowerCase()),
-                  )
-                : null;
-            return {
-              qtyOrdered: line.qtyOrdered,
-              pieceWeightLbs: matched?.pieceWeightLbs ?? null,
-            };
-          });
+          // Build per-warehouse shipments by replicating the same Ships-from
+          // logic used in LineItemRow: honor the SO consolidation warehouse
+          // when it covers the line; otherwise pick the highest-priority
+          // warehouse with full stock; otherwise allocate via computeSplit
+          // across multiple warehouses. Then group lines by warehouse so we
+          // can hit UPS once per warehouse and sum the totals.
+          const shipmentMap = new Map<
+            string,
+            {
+              warehouse: { id: string; name?: string };
+              lines: Array<{
+                qtyOrdered: number;
+                pieceWeightLbs: number | null;
+              }>;
+            }
+          >();
+          function addToShipment(
+            warehouse: { id: string; name?: string },
+            qty: number,
+            pieceWeightLbs: number | null,
+          ) {
+            if (qty <= 0) return;
+            const existing = shipmentMap.get(warehouse.id);
+            if (existing) {
+              existing.lines.push({ qtyOrdered: qty, pieceWeightLbs });
+            } else {
+              shipmentMap.set(warehouse.id, {
+                warehouse: { id: warehouse.id, name: warehouse.name },
+                lines: [{ qtyOrdered: qty, pieceWeightLbs }],
+              });
+            }
+          }
+          for (const { line, lookup } of okRows) {
+            if (lookup.status !== "ok") continue;
+            const matched = lookup.lines.find(
+              (l) =>
+                (!line.color ||
+                  l.color?.toLowerCase() === line.color.toLowerCase()) &&
+                (!line.size ||
+                  l.size?.toLowerCase() === line.size.toLowerCase()),
+            );
+            const warehouses = (matched?.warehouses ?? []).filter(
+              (w) => w.quantity > 0,
+            );
+            if (warehouses.length === 0) continue;
+            const pieceWeightLbs = matched?.pieceWeightLbs ?? null;
+
+            // Honor consolidation if it can cover this line.
+            let primary: { id: string; name?: string } | null = null;
+            if (consolidationWarehouseId) {
+              primary =
+                warehouses.find(
+                  (w) =>
+                    w.id === consolidationWarehouseId &&
+                    w.quantity >= line.qtyOrdered,
+                ) ?? null;
+            }
+            if (!primary) {
+              primary = pickPrimaryWarehouse(
+                warehouses,
+                line.qtyOrdered,
+                shipToZip,
+              );
+            }
+            if (primary) {
+              addToShipment(primary, line.qtyOrdered, pieceWeightLbs);
+            } else {
+              // Line must split across warehouses.
+              const split = computeSplit(
+                warehouses,
+                line.qtyOrdered,
+                shipToZip,
+              );
+              for (const a of split.allocations) {
+                addToShipment(a.warehouse, a.qty, pieceWeightLbs);
+              }
+            }
+          }
+          const shipments: FreightShipmentInput[] = Array.from(
+            shipmentMap.values(),
+          ).map((s) => ({
+            fromWarehouse: s.warehouse,
+            lines: s.lines,
+          }));
           const freight = await estimateFreight({
-            fromWarehouse: consolidationWarehouse,
             toZip: shipToZip,
-            lines: freightLines,
+            shipments,
           });
 
           return (
@@ -203,41 +267,79 @@ export default async function JobPage({ params }: Props) {
                     Consolidates to a single warehouse
                   </p>
                 )}
-                {freight.status === "ok" && (
-                  <p
-                    className="text-cg-n-700 text-[11px] mt-1 tabular-nums"
-                    title={[
-                      `UPS ${freight.estimate.serviceName}  ·  ${freight.estimate.isNegotiated ? "negotiated rate" : "list rate"}`,
-                      `From: ${freight.fromZip}  →  To: ${freight.toZip}`,
-                      `Quantity: ${freight.weight.totalQty.toLocaleString()} pieces across ${freight.weight.totalLines} line${freight.weight.totalLines === 1 ? "" : "s"}`,
-                      `Avg piece weight: ${freight.weight.avgPieceWeightLbs.toFixed(2)} lbs (${freight.weight.linesWithRealWeight} of ${freight.weight.totalLines} line${freight.weight.totalLines === 1 ? "" : "s"} from real vendor data, rest default 0.5 lb)`,
-                      `Total weight: ${freight.weight.totalWeightLbs} lbs`,
-                      `Packages: ${freight.estimate.packages} (≤70 lb each, 24×16×16 in default dims)`,
-                      freight.estimate.transitDays != null
-                        ? `Transit: ${freight.estimate.transitDays} business day${freight.estimate.transitDays === 1 ? "" : "s"}`
-                        : "Transit: not returned",
-                      `Total: ${freight.estimate.totalCharge.toLocaleString("en-US", { style: "currency", currency: freight.estimate.currency })}`,
-                      "",
-                      "Box dimensions still use a default; precise dims would require an extra SanMar API call per style.",
-                    ].join("\n")}
-                  >
-                    Estimated freight:{" "}
-                    <span className="font-semibold">
-                      {freight.estimate.totalCharge.toLocaleString("en-US", {
-                        style: "currency",
-                        currency: freight.estimate.currency,
-                      })}
-                    </span>{" "}
-                    {freight.estimate.serviceName}
-                    {freight.estimate.transitDays != null
-                      ? ` · ~${freight.estimate.transitDays}-day transit`
-                      : ""}
-                    {" · "}
-                    {freight.weight.totalWeightLbs} lbs
-                    {" · "}
-                    <span className="text-cg-n-500">hover for details</span>
-                  </p>
-                )}
+                {freight.status === "ok" && (() => {
+                  const totalWeight = freight.shipments.reduce(
+                    (n, s) => n + s.weight.totalWeightLbs,
+                    0,
+                  );
+                  const totalPackages = freight.shipments.reduce(
+                    (n, s) => n + s.estimate.packages,
+                    0,
+                  );
+                  const totalQty = freight.shipments.reduce(
+                    (n, s) => n + s.weight.totalQty,
+                    0,
+                  );
+                  const realWeightLines = freight.shipments.reduce(
+                    (n, s) => n + s.weight.linesWithRealWeight,
+                    0,
+                  );
+                  const totalLines = freight.shipments.reduce(
+                    (n, s) => n + s.weight.totalLines,
+                    0,
+                  );
+                  const tooltipLines: string[] = [
+                    `UPS Ground · ${freight.shipments.length} shipment${freight.shipments.length === 1 ? "" : "s"} · ${freight.shipments[0].estimate.isNegotiated ? "negotiated rate" : "list rate"}`,
+                    `Destination zip: ${shipToZip ?? "98512"}`,
+                    `Quantity: ${totalQty.toLocaleString()} pieces across ${totalLines} line${totalLines === 1 ? "" : "s"}`,
+                    `Real vendor weights: ${realWeightLines} of ${totalLines} line${totalLines === 1 ? "" : "s"}`,
+                    `Total weight: ${totalWeight} lbs across ${totalPackages} package${totalPackages === 1 ? "" : "s"} (≤70 lb each, 24×16×16 in default dims)`,
+                    "",
+                  ];
+                  for (const s of freight.shipments) {
+                    tooltipLines.push(
+                      `• ${s.warehouseName} (${s.fromZip}): ${s.weight.totalQty.toLocaleString()} pcs · ${s.weight.totalWeightLbs} lbs · ${s.estimate.packages} pkg · ${s.estimate.transitDays != null ? `~${s.estimate.transitDays}d` : "transit ?"} · ${s.estimate.totalCharge.toLocaleString("en-US", { style: "currency", currency: s.estimate.currency })}`,
+                    );
+                  }
+                  if (freight.skipped.length > 0) {
+                    tooltipLines.push("", "Could not quote:");
+                    for (const sk of freight.skipped) {
+                      tooltipLines.push(`• ${sk.warehouseName}: ${sk.reason}`);
+                    }
+                  }
+                  tooltipLines.push(
+                    "",
+                    "Box dimensions use a default; precise dims would require an extra SanMar API call per style.",
+                  );
+                  return (
+                    <p
+                      className="text-cg-n-700 text-[11px] mt-1 tabular-nums"
+                      title={tooltipLines.join("\n")}
+                    >
+                      Estimated freight:{" "}
+                      <span className="font-semibold">
+                        {freight.totalCharge.toLocaleString("en-US", {
+                          style: "currency",
+                          currency: freight.currency,
+                        })}
+                      </span>{" "}
+                      Ground
+                      {freight.maxTransitDays != null
+                        ? ` · ~${freight.maxTransitDays}-day transit`
+                        : ""}
+                      {" · "}
+                      {totalWeight} lbs
+                      {freight.shipments.length > 1
+                        ? ` · ${freight.shipments.length} shipments`
+                        : ""}
+                      {freight.skipped.length > 0
+                        ? ` · ${freight.skipped.length} unquoted`
+                        : ""}
+                      {" · "}
+                      <span className="text-cg-n-500">hover for details</span>
+                    </p>
+                  );
+                })()}
                 {freight.status === "skipped" && (
                   <p className="text-cg-n-400 text-[10px] mt-1">
                     Freight estimate: {freight.reason}

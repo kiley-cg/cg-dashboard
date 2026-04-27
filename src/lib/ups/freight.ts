@@ -1,11 +1,6 @@
 import { getUpsGroundRate, type RateEstimate } from "./rating";
 import { warehouseZip } from "./warehouse-zips";
 
-// Default per-piece weight when the vendor didn't return one. Most decorated
-// apparel falls between 0.4 lb (lightweight tee) and 1.5 lb (hoodie). 0.5 lb
-// biases low for a tee-heavy mix. SanMar (via getProductInfoByStyleColorSize)
-// and S&S (via /v2/products) both expose real weights now, so this fallback
-// only kicks in when a specific line lacks one.
 const DEFAULT_PIECE_WEIGHT_LBS = 0.5;
 
 export type FreightLineInput = {
@@ -13,31 +8,42 @@ export type FreightLineInput = {
   pieceWeightLbs: number | null;
 };
 
-export type FreightEstimateInput = {
-  fromWarehouse: { id: string; name?: string } | null;
-  toZip: string | null;
+export type FreightShipmentInput = {
+  fromWarehouse: { id: string; name?: string };
   lines: FreightLineInput[];
+};
+
+export type FreightEstimateInput = {
+  toZip: string | null;
+  shipments: FreightShipmentInput[];
 };
 
 export type WeightBreakdown = {
   totalQty: number;
   totalWeightLbs: number;
-  // Average piece weight across all lines, qty-weighted.
   avgPieceWeightLbs: number;
-  // How many of the lines had a real per-piece weight from the vendor; the
-  // rest fell back to the default. Surface this in the tooltip so the rep
-  // knows how confident the total weight is.
   linesWithRealWeight: number;
   totalLines: number;
+};
+
+export type FreightShipmentResult = {
+  warehouseName: string;
+  warehouseId: string;
+  fromZip: string;
+  weight: WeightBreakdown;
+  estimate: RateEstimate;
 };
 
 export type FreightEstimateResult =
   | {
       status: "ok";
-      estimate: RateEstimate;
-      weight: WeightBreakdown;
-      fromZip: string;
-      toZip: string;
+      totalCharge: number;
+      currency: string;
+      maxTransitDays: number | null;
+      shipments: FreightShipmentResult[];
+      // Anything that couldn't be quoted (no zip, no qty, etc.). UI surfaces
+      // the count so the rep knows the total may be incomplete.
+      skipped: Array<{ warehouseName: string; reason: string }>;
     }
   | { status: "skipped"; reason: string }
   | { status: "error"; message: string };
@@ -72,58 +78,110 @@ export async function estimateFreight(
   if (!process.env.UPS_CLIENT_ID || !process.env.UPS_CLIENT_SECRET) {
     return { status: "skipped", reason: "UPS credentials not configured" };
   }
-  if (!input.fromWarehouse) {
-    return {
-      status: "skipped",
-      reason: "Multi-warehouse split — single quote not applicable",
-    };
-  }
-  const fromZip = warehouseZip(input.fromWarehouse);
-  if (!fromZip) {
-    return {
-      status: "skipped",
-      reason: `Warehouse ${input.fromWarehouse.name ?? input.fromWarehouse.id} has no known zip`,
-    };
+  if (input.shipments.length === 0) {
+    return { status: "skipped", reason: "No shipments to quote" };
   }
   const toZip = (input.toZip ?? HOME_ZIP).trim();
   if (!toZip) {
     return { status: "skipped", reason: "No destination zip" };
   }
 
-  const weight = computeWeight(input.lines);
-  if (weight.totalQty <= 0) {
-    return { status: "skipped", reason: "No quantities to weigh" };
+  // Quote each warehouse-grouped shipment in parallel, accumulating partial
+  // failures separately so a single warehouse error doesn't kill the total.
+  const settled = await Promise.all(
+    input.shipments.map(async (s) => {
+      const fromZip = warehouseZip(s.fromWarehouse);
+      const warehouseName = s.fromWarehouse.name ?? s.fromWarehouse.id;
+      if (!fromZip) {
+        return {
+          ok: false as const,
+          warehouseName,
+          reason: `No known zip for ${warehouseName}`,
+        };
+      }
+      const weight = computeWeight(s.lines);
+      if (weight.totalQty <= 0) {
+        return {
+          ok: false as const,
+          warehouseName,
+          reason: "No quantities to weigh",
+        };
+      }
+      try {
+        const estimate = await getUpsGroundRate({
+          fromZip,
+          toZip,
+          totalWeightLbs: weight.totalWeightLbs,
+        });
+        console.log("[ups] freight estimate", {
+          fromZip,
+          toZip,
+          warehouseName,
+          totalQty: weight.totalQty,
+          avgPieceWeightLbs: Number(weight.avgPieceWeightLbs.toFixed(3)),
+          linesWithRealWeight: `${weight.linesWithRealWeight}/${weight.totalLines}`,
+          totalWeightLbs: weight.totalWeightLbs,
+          packages: estimate.packages,
+          totalCharge: estimate.totalCharge,
+          currency: estimate.currency,
+          transitDays: estimate.transitDays,
+          isNegotiated: estimate.isNegotiated,
+        });
+        return {
+          ok: true as const,
+          shipment: {
+            warehouseName,
+            warehouseId: s.fromWarehouse.id,
+            fromZip,
+            weight,
+            estimate,
+          },
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[ups] freight estimate failed", {
+          fromZip,
+          toZip,
+          warehouseName,
+          totalWeightLbs: weight.totalWeightLbs,
+          message,
+        });
+        return { ok: false as const, warehouseName, reason: message };
+      }
+    }),
+  );
+
+  const shipments = settled
+    .filter((r): r is Extract<typeof r, { ok: true }> => r.ok)
+    .map((r) => r.shipment);
+  const skipped = settled
+    .filter((r): r is Extract<typeof r, { ok: false }> => !r.ok)
+    .map((r) => ({ warehouseName: r.warehouseName, reason: r.reason }));
+
+  if (shipments.length === 0) {
+    return {
+      status: "error",
+      message:
+        skipped[0]?.reason ?? "All shipment quotes failed",
+    };
   }
 
-  try {
-    const estimate = await getUpsGroundRate({
-      fromZip,
-      toZip,
-      totalWeightLbs: weight.totalWeightLbs,
-    });
-    console.log("[ups] freight estimate", {
-      fromZip,
-      toZip,
-      totalQty: weight.totalQty,
-      avgPieceWeightLbs: Number(weight.avgPieceWeightLbs.toFixed(3)),
-      linesWithRealWeight: `${weight.linesWithRealWeight}/${weight.totalLines}`,
-      totalWeightLbs: weight.totalWeightLbs,
-      packages: estimate.packages,
-      service: estimate.serviceName,
-      totalCharge: estimate.totalCharge,
-      currency: estimate.currency,
-      transitDays: estimate.transitDays,
-      isNegotiated: estimate.isNegotiated,
-    });
-    return { status: "ok", estimate, weight, fromZip, toZip };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[ups] freight estimate failed", {
-      fromZip,
-      toZip,
-      totalWeightLbs: weight.totalWeightLbs,
-      message,
-    });
-    return { status: "error", message };
-  }
+  const totalCharge = shipments.reduce(
+    (n, s) => n + s.estimate.totalCharge,
+    0,
+  );
+  const currency = shipments[0].estimate.currency;
+  const transits = shipments
+    .map((s) => s.estimate.transitDays)
+    .filter((d): d is number => d != null);
+  const maxTransitDays = transits.length ? Math.max(...transits) : null;
+
+  return {
+    status: "ok",
+    totalCharge,
+    currency,
+    maxTransitDays,
+    shipments,
+    skipped,
+  };
 }
