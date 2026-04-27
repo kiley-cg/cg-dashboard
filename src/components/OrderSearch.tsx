@@ -4,18 +4,18 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Button } from "./Button";
 
-type Mode = "job" | "quote";
+// Quote lookup is disabled until Syncore exposes a quotes endpoint in their
+// V2 API. The /quotes/[id] route still exists so we can flip this back on
+// quickly when they ship it. Tested URL patterns that all 404'd:
+//   /v2/orders/quotes/{id}
+//   /v2/quotes/{id}
+//   /v2/orders/clients/{client_id}/quotes/{number}
+const QUOTES_ENABLED = false;
 
 export function OrderSearch() {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("job");
   const [value, setValue] = useState("");
   const [pending, startTransition] = useTransition();
-
-  const placeholder =
-    mode === "job"
-      ? "Syncore Job ID (e.g. 4991)"
-      : "Syncore Quote # (e.g. 494715-172)";
 
   return (
     <div className="w-full max-w-md">
@@ -27,38 +27,37 @@ export function OrderSearch() {
         <button
           type="button"
           role="tab"
-          aria-selected={mode === "job"}
-          onClick={() => setMode("job")}
-          className={`px-3 py-1.5 rounded-input transition ${
-            mode === "job"
-              ? "bg-white text-cg-n-900 shadow-sm"
-              : "text-cg-n-500 hover:text-cg-n-700"
-          }`}
+          aria-selected={true}
+          className="px-3 py-1.5 rounded-input bg-white text-cg-n-900 shadow-sm"
         >
           Job
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={mode === "quote"}
-          onClick={() => setMode("quote")}
-          className={`px-3 py-1.5 rounded-input transition ${
-            mode === "quote"
-              ? "bg-white text-cg-n-900 shadow-sm"
-              : "text-cg-n-500 hover:text-cg-n-700"
-          }`}
+          aria-selected={false}
+          disabled={!QUOTES_ENABLED}
+          title={
+            QUOTES_ENABLED
+              ? undefined
+              : "Quote lookup is waiting on a Syncore V2 API endpoint that doesn't exist yet."
+          }
+          className="px-3 py-1.5 rounded-input text-cg-n-400 cursor-not-allowed inline-flex items-center gap-1.5"
         >
           Quote
+          <span className="text-[9px] uppercase tracking-wider bg-cg-n-200 text-cg-n-600 px-1.5 py-0.5 rounded">
+            Coming soon
+          </span>
         </button>
       </div>
+
       <form
         onSubmit={(e) => {
           e.preventDefault();
           const trimmed = value.trim();
           if (!trimmed) return;
-          const segment = mode === "job" ? "jobs" : "quotes";
           startTransition(() => {
-            router.push(`/${segment}/${encodeURIComponent(trimmed)}`);
+            router.push(`/jobs/${encodeURIComponent(trimmed)}`);
           });
         }}
         className="flex gap-3"
@@ -66,8 +65,8 @@ export function OrderSearch() {
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder={placeholder}
-          aria-label={mode === "job" ? "Syncore Job ID" : "Syncore Quote ID"}
+          placeholder="Syncore Job ID (e.g. 4991)"
+          aria-label="Syncore Job ID"
           disabled={pending}
           className="flex-1 bg-white border border-cg-n-200 rounded-input px-4 py-2 text-cg-n-900 placeholder-cg-n-400 focus:outline-none focus:border-cg-red focus:ring-2 focus:ring-cg-red-100 disabled:bg-cg-n-50 disabled:text-cg-n-400"
           autoFocus
@@ -86,6 +85,11 @@ export function OrderSearch() {
           )}
         </Button>
       </form>
+
+      <p className="text-cg-n-500 text-xs mt-3 max-w-md">
+        Need to check inventory on a quote? Convert it to a job in Syncore
+        first — Syncore&apos;s V2 API doesn&apos;t expose quotes yet.
+      </p>
     </div>
   );
 }
