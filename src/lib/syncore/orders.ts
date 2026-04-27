@@ -2,11 +2,13 @@ import { syncoreFetch } from "./client";
 import {
   SyncoreJobSchema,
   SyncoreLineItemSchema,
+  SyncoreQuoteSchema,
   SyncoreSalesOrdersListSchema,
   SyncoreSalesOrderSchema,
   type FlatLineItem,
   type SyncoreJob,
   type SyncoreLineItem,
+  type SyncoreQuote,
   type SyncoreSalesOrder,
 } from "./types";
 import { z } from "zod";
@@ -77,6 +79,27 @@ export async function getJobBundle(jobId: string | number): Promise<{
     listSalesOrders(jobId),
   ]);
   return { job, salesOrders };
+}
+
+/**
+ * Quote lookup. The endpoint isn't formally in the Syncore docs we have,
+ * but the conventional path mirrors jobs: /orders/quotes/{id}. If the
+ * actual path differs, this is the one place to adjust.
+ */
+export async function getQuote(quoteId: string | number): Promise<SyncoreQuote> {
+  const raw = await syncoreFetch<unknown>(
+    `/orders/quotes/${encodeURIComponent(String(quoteId))}`,
+  );
+  return SyncoreQuoteSchema.parse(raw);
+}
+
+export async function listQuoteLineItems(
+  quoteId: string | number,
+): Promise<SyncoreLineItem[]> {
+  const raw = await syncoreFetch<unknown>(
+    `/orders/quotes/${encodeURIComponent(String(quoteId))}/lineitems`,
+  );
+  return z.array(SyncoreLineItemSchema).parse(raw);
 }
 
 /**

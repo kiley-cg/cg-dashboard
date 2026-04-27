@@ -146,6 +146,26 @@ export const SyncoreJobSchema = z
   .passthrough();
 export type SyncoreJob = z.infer<typeof SyncoreJobSchema>;
 
+// Quote schema — Syncore docs don't formally document this endpoint yet,
+// so the shape is intentionally loose (passthrough). We expect at minimum
+// id, status, client, and either line_items inline or a related endpoint
+// to resolve them.
+export const SyncoreQuoteSchema = z
+  .object({
+    id: z.number(),
+    quote_number: z.union([z.number(), z.string()]).nullish(),
+    number: z.union([z.number(), z.string()]).nullish(),
+    status: z.string().nullish(),
+    date: z.string().nullish(),
+    description: z.string().nullish(),
+    client: SyncoreClientRefSchema.nullish(),
+    line_items: z.array(SyncoreLineItemSchema).default([]),
+    customer_order_number: z.string().nullish(),
+    customer_instructions: z.string().nullish(),
+  })
+  .passthrough();
+export type SyncoreQuote = z.infer<typeof SyncoreQuoteSchema>;
+
 // Denormalized row for inventory lookup — one per (product, color, size, qty).
 // productId (style number) may be null when the source line has no SKU and
 // only a placeholder product_id of 0; we still surface the row so the rep
