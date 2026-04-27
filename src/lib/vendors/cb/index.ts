@@ -36,13 +36,22 @@ export async function fetchCutterBuckInventory(
     throw new Error("CB_WS_ID and CB_WS_PASSWORD must be set");
   }
 
+  // C&B's docs sample only shows id/password/productID/productIDtype, but
+  // their .NET service throws NullReferenceException if localization fields
+  // are absent — they're standard on every other PromoStandards 1.2.1 call.
+  // Send both productID (their documented capital-ID form) and productId
+  // (standard PromoStandards lowercase) — the WSDL serializer drops
+  // whichever the schema doesn't declare.
   const client = await getClient();
   const [response] = (await client.getInventoryLevelsAsync({
     wsVersion: "1.2.1",
     id,
     password,
     productID: productId,
+    productId,
     productIDtype: "Distributor",
+    localizationCountry: "US",
+    localizationLanguage: "en",
   })) as [unknown];
 
   return mapCutterBuckInventory(response);
