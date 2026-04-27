@@ -31,20 +31,28 @@ function matchingLine(
   return exact ?? null;
 }
 
-// Color Graphics is based in Washington, so the closer-to-WA a warehouse is,
-// the better. When multiple warehouses can fulfill a line in one shipment,
-// we prefer them in this order. Each entry is a list of substring keywords
-// to match against a warehouse's name or ID/abbreviation. Anything unmatched
-// goes to the bottom of the priority list.
+// Color Graphics ships from Olympia, WA (zip 98512), so the closer-to-WA a
+// warehouse is, the better. When multiple warehouses can fulfill a line in
+// one shipment, prefer them in this order. Each entry is a list of substring
+// keywords to match against a warehouse's name OR its ID/abbreviation —
+// SanMar returns city names ("Seattle"), S&S returns state abbreviations
+// ("NV"), and the matcher handles both. Anything unmatched falls to the
+// bottom of the list.
 const WAREHOUSE_PRIORITY: ReadonlyArray<readonly string[]> = [
-  ["seattle", "wa"],
-  ["reno", "nv"],
-  ["phoenix", "az"],
-  ["dallas", "tx"],
-  ["cincinnati", "ohio", "oh"],
-  ["richmond", "va"],
-  ["robbinsville", "nj"],
-  ["jacksonville", "fl"],
+  ["seattle", "wa"],                                  // SanMar Seattle
+  ["reno", "nv"],                                     // SanMar Reno + S&S NV
+  ["phoenix", "az"],                                  // SanMar Phoenix
+  ["dallas", "fort worth", "ft worth", "tx"],         // SanMar Dallas + S&S TX
+  ["olathe", "kansas", "ks"],                         // S&S KS
+  ["lockport", "illinois", "il"],                     // S&S IL
+  ["cincinnati", "ohio", "oh"],                       // SanMar Cincinnati
+  ["minneapolis", "mn"],                              // SanMar Minneapolis
+  ["atlanta", "ga"],                                  // S&S GA
+  ["richmond", "va"],                                 // SanMar Richmond
+  ["robbinsville", "cranbury", "nj"],                 // SanMar + S&S NJ
+  ["reading", "pa"],                                  // S&S PA
+  ["jacksonville", "fl"],                             // SanMar Jacksonville
+  ["middleboro", "lakeville", "ma"],                  // S&S MA
 ];
 
 function warehousePriority(w: { id: string; name?: string }): number {
