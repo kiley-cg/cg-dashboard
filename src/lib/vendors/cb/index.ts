@@ -46,14 +46,16 @@ export async function fetchCutterBuckInventory(
   let response: unknown;
   try {
     [response] = (await client.getInventoryLevelsAsync({
-      wsVersion: "1.2.1",
+      // wsVersion must match the WSDL's targetNamespace: C&B's WSDL is
+      // labeled "InventoryService121.asmx" but its namespace is
+      // .../InventoryService/1.0.0/, and per the spec the wsVersion field
+      // matches the namespace, not the service name. Sending "1.2.1" is
+      // what triggered the .NET NRE.
+      wsVersion: "1.0.0",
       id,
       password,
       productID: productId,
-      productId,
       productIDtype: "Distributor",
-      localizationCountry: "US",
-      localizationLanguage: "en",
     })) as [unknown];
   } catch (err) {
     // C&B's .NET service throws "Object reference not set" with no detail
