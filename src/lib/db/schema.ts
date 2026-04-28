@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   uuid,
+  index,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
@@ -81,3 +82,64 @@ export const verifications = pgTable("verifications", {
   verifiedAt: timestamp("verified_at", { mode: "date" }).notNull().defaultNow(),
   note: text("note"),
 });
+
+// CSR Follow-Up snapshots, twice-daily on weekdays. One row per (snapshot
+// run, CSR, status) — see src/lib/syncore/followups.ts.
+
+export const followupSnapshots = pgTable(
+  "followup_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    snapshotAt: timestamp("snapshot_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+    csrId: integer("csr_id").notNull(),
+    csrName: text("csr_name").notNull(),
+    // "open" | "completed". Stored as text rather than a pg enum so we can
+    // add new statuses without a migration if Syncore introduces one.
+    followUpStatus: text("follow_up_status").notNull(),
+    // YYYY-MM-DD in America/Los_Angeles — the date filter we queried.
+    followUpDate: text("follow_up_date").notNull(),
+    totalRecords: integer("total_records").notNull(),
+    totalIssues: integer("total_issues").notNull(),
+    issueCounts: jsonb("issue_counts").notNull(),
+    rawStatistics: jsonb("raw_statistics").notNull(),
+  },
+  (t) => ({
+    idxCsrTime: index("followup_snapshots_csr_time_idx").on(
+      t.csrId,
+      t.snapshotAt,
+    ),
+    idxTime: index("followup_snapshots_time_idx").on(t.snapshotAt),
+  }),
+);
+
+export const followupRows = pgTable(
+  "followup_rows",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    snapshotId: uuid("snapshot_id")
+      .notNull()
+      .references(() => followupSnapshots.id, { onDelete: "cascade" }),
+    snapshotAt: timestamp("snapshot_at", { mode: "date" }).notNull(),
+    csrId: integer("csr_id").notNull(),
+    csrName: text("csr_name").notNull(),
+    followUpStatus: text("follow_up_status").notNull(),
+    jobId: integer("job_id").notNull(),
+    fuDate: text("fu_date"),
+    contact: text("contact"),
+    jobStatus: text("job_status"),
+    supplier: text("supplier"),
+    jobDescription: text("job_description"),
+    primaryRep: text("primary_rep"),
+    priority: text("priority"),
+    estDelivery: text("est_delivery"),
+    issue: text("issue"),
+    raw: jsonb("raw").notNull(),
+  },
+  (t) => ({
+    idxTimeCsr: index("followup_rows_time_csr_idx").on(t.snapshotAt, t.csrId),
+    idxJobTime: index("followup_rows_job_time_idx").on(t.jobId, t.snapshotAt),
+    idxIssue: index("followup_rows_issue_idx").on(t.snapshotAt, t.issue),
+  }),
+);

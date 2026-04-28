@@ -1,5 +1,6 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
+import { isManager } from "./managers";
 
 const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN;
 
@@ -37,7 +38,13 @@ export const authConfig: NextAuthConfig = {
       if (path.startsWith("/signin") || path.startsWith("/api/auth")) {
         return true;
       }
-      return !!session?.user;
+      if (!session?.user) return false;
+      // /dashboard and /api/dashboard are manager-only. Cron routes have
+      // their own header-based secret check; they don't need a session.
+      if (path.startsWith("/dashboard") || path.startsWith("/api/dashboard")) {
+        return isManager(session.user.email);
+      }
+      return true;
     },
   },
 };
