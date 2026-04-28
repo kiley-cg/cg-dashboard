@@ -10,11 +10,7 @@ import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit } from "
 import { estimateFreight, type FreightShipmentInput } from "@/lib/ups/freight";
 import { LineItemRow } from "@/components/LineItemRow";
 import { Badge } from "@/components/Badge";
-import {
-  DECORATORS,
-  DEFAULT_DECORATOR_ID,
-  decoratorById,
-} from "@/lib/decorators";
+import { DEFAULT_DECORATOR_ID, decoratorById } from "@/lib/decorators";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -212,23 +208,13 @@ export default async function JobPage({ params, searchParams }: Props) {
                 </Link>
               </div>
               <div className="flex items-center gap-2 text-xs">
-                <span className="text-cg-n-500">Decorator:</span>
-                {DECORATORS.map((d) => {
-                  const active = d.id === decorator.id;
-                  return (
-                    <Link
-                      key={d.id}
-                      href={buildHref({ decorator: d.id })}
-                      className={
-                        active
-                          ? "text-cg-red font-semibold underline"
-                          : "text-cg-n-500 hover:text-cg-n-900"
-                      }
-                    >
-                      {d.name}
-                    </Link>
-                  );
-                })}
+                <span className="text-cg-n-500 uppercase tracking-wider font-semibold">
+                  Decorator:
+                </span>
+                <span className="text-cg-n-900 font-semibold">
+                  {decorator.name}
+                </span>
+                <span className="text-cg-n-500">({decorator.zip})</span>
               </div>
             </div>
         {decoratorFreight?.status === "ok" ? (() => {
