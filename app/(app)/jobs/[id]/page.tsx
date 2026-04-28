@@ -6,7 +6,7 @@ import {
   autoVerifyClean,
   findVerificationsForJob,
 } from "@/lib/db/verifications";
-import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit } from "@/lib/vendors/warehouse-priority";
+import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit, warehouseRank } from "@/lib/vendors/warehouse-priority";
 import { estimateFreight, type FreightShipmentInput } from "@/lib/ups/freight";
 import { LineItemRow } from "@/components/LineItemRow";
 import { Badge } from "@/components/Badge";
@@ -76,6 +76,57 @@ export default async function JobPage({ params }: Props) {
     });
   }
 
+  // Job-level consolidated freight estimate: pretend every line ships
+  // from ONE warehouse to the job's destination, regardless of actual
+  // stock allocation. This is the apples-to-apples number to compare
+  // against a vendor invoice (vendors consolidate from their nearest
+  // stocked warehouse). The per-SO cards keep showing real
+  // split-allocation freight, which can be 1.5–2× higher when stock
+  // splits across distant warehouses.
+  const consolidatedFreight = await (async () => {
+    const allLines: { qtyOrdered: number; pieceWeightLbs: number | null }[] =
+      [];
+    const allWarehousesById = new Map<
+      string,
+      { id: string; name?: string }
+    >();
+    const jobShipToZip =
+      (salesOrders[0]?.ship_to as { zip?: string } | undefined)?.zip ?? null;
+
+    for (const { rows } of enriched) {
+      for (const { line, lookup } of rows) {
+        if (lookup.status !== "ok") continue;
+        const matched = lookup.lines.find(
+          (l) =>
+            (!line.color ||
+              l.color?.toLowerCase() === line.color.toLowerCase()) &&
+            (!line.size ||
+              l.size?.toLowerCase() === line.size.toLowerCase()),
+        );
+        if (!matched) continue;
+        allLines.push({
+          qtyOrdered: line.qtyOrdered,
+          pieceWeightLbs: matched.pieceWeightLbs ?? null,
+        });
+        for (const w of matched.warehouses ?? []) {
+          if (!allWarehousesById.has(w.id)) {
+            allWarehousesById.set(w.id, { id: w.id, name: w.name });
+          }
+        }
+      }
+    }
+    if (allLines.length === 0 || allWarehousesById.size === 0) return null;
+    const ranked = Array.from(allWarehousesById.values()).sort(
+      (a, b) =>
+        warehouseRank(a, jobShipToZip) - warehouseRank(b, jobShipToZip),
+    );
+    const fromWarehouse = ranked[0];
+    return estimateFreight({
+      toZip: jobShipToZip,
+      shipments: [{ fromWarehouse, lines: allLines }],
+    });
+  })();
+
   return (
     <section className="max-w-6xl mx-auto px-6 py-10">
       <Link href="/" className="text-cg-n-500 hover:text-cg-n-900 text-sm">
@@ -102,6 +153,33 @@ export default async function JobPage({ params }: Props) {
         </div>
         {job.status && <Badge tone="neutral">{job.status}</Badge>}
       </div>
+
+      {consolidatedFreight?.status === "ok" && (() => {
+        const s = consolidatedFreight.shipments[0];
+        return (
+          <div className="bg-white border border-cg-n-200 rounded-card p-4 mb-6 shadow-sm">
+            <p className="text-cg-n-500 text-xs uppercase tracking-wider font-semibold">
+              Vendor-invoice comparison · consolidated to one warehouse
+            </p>
+            <p className="text-2xl font-bold mt-1 tabular-nums">
+              {consolidatedFreight.totalCharge.toLocaleString("en-US", {
+                style: "currency",
+                currency: consolidatedFreight.currency,
+              })}
+            </p>
+            <p className="text-cg-n-500 text-xs mt-1">
+              If everything shipped from {s.warehouseName} ({s.fromZip}):{" "}
+              {s.weight.totalQty.toLocaleString()} pcs ·{" "}
+              {s.weight.totalWeightLbs} lbs · {s.estimate.packages} pkg
+              {s.estimate.transitDays != null
+                ? ` · ~${s.estimate.transitDays}-day transit`
+                : ""}{" "}
+              · {s.estimate.isNegotiated ? "negotiated rate" : "list rate"}.
+              Per-SO cards below reflect actual split allocations.
+            </p>
+          </div>
+        );
+      })()}
 
       <div className="space-y-8">
         {enriched.length === 0 && (
