@@ -26,12 +26,14 @@ export type RateEstimate = {
   isNegotiated: boolean;
 };
 
-// Default calibration factor derived from one real invoice:
-//   Job 32268: actual $167.58 / our estimate $253.35 = 0.661.
+// Calibration factor against real invoices. Job 32268 hit at exactly
+// 0.661 ($167.58 actual vs $253.35 raw quote), but we keep the
+// default biased high (0.75) to err on the side of overestimating —
+// underquoting freight to a customer is worse than overquoting.
 // Override via UPS_RATE_CALIBRATION env var. Reset to "1" once UPS
 // starts returning negotiated rates, since the multiplier becomes
 // double-counting at that point.
-const DEFAULT_CALIBRATION = 0.66;
+const DEFAULT_CALIBRATION = 0.75;
 
 function calibrationFactor(): number {
   const raw = process.env.UPS_RATE_CALIBRATION?.trim();
