@@ -7,6 +7,7 @@ import {
   findVerificationsForJob,
 } from "@/lib/db/verifications";
 import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit } from "@/lib/vendors/warehouse-priority";
+import { matchVariant } from "@/lib/vendors/match";
 import { estimateFreight, type FreightShipmentInput } from "@/lib/ups/freight";
 import { LineItemRow } from "@/components/LineItemRow";
 import { Badge } from "@/components/Badge";
@@ -109,13 +110,7 @@ export default async function JobPage({ params, searchParams }: Props) {
     for (const { rows } of enriched) {
       for (const { line, lookup } of rows) {
         if (lookup.status !== "ok") continue;
-        const matched = lookup.lines.find(
-          (l) =>
-            (!line.color ||
-              l.color?.toLowerCase() === line.color.toLowerCase()) &&
-            (!line.size ||
-              l.size?.toLowerCase() === line.size.toLowerCase()),
-        );
+        const matched = matchVariant(lookup, line.color, line.size);
         if (!matched) continue;
         allLines.push({
           qtyOrdered: line.qtyOrdered,
@@ -283,18 +278,7 @@ export default async function JobPage({ params, searchParams }: Props) {
           const okRows = rows.filter((r) => r.lookup.status === "ok");
           const consolidationWarehouseId = pickConsolidationWarehouse(
             okRows.map(({ line, lookup }) => {
-              const matched =
-                lookup.status === "ok"
-                  ? lookup.lines.find(
-                      (l) =>
-                        (!line.color ||
-                          l.color?.toLowerCase() ===
-                            line.color.toLowerCase()) &&
-                        (!line.size ||
-                          l.size?.toLowerCase() ===
-                            line.size.toLowerCase()),
-                    )
-                  : null;
+              const matched = matchVariant(lookup, line.color, line.size);
               return {
                 qtyOrdered: line.qtyOrdered,
                 warehouses: matched?.warehouses ?? [],
@@ -351,13 +335,7 @@ export default async function JobPage({ params, searchParams }: Props) {
           }
           for (const { line, lookup } of okRows) {
             if (lookup.status !== "ok") continue;
-            const matched = lookup.lines.find(
-              (l) =>
-                (!line.color ||
-                  l.color?.toLowerCase() === line.color.toLowerCase()) &&
-                (!line.size ||
-                  l.size?.toLowerCase() === line.size.toLowerCase()),
-            );
+            const matched = matchVariant(lookup, line.color, line.size);
             const warehouses = (matched?.warehouses ?? []).filter(
               (w) => w.quantity > 0,
             );

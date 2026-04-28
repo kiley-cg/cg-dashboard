@@ -10,6 +10,7 @@ import {
   warehouseRank,
 } from "@/lib/vendors/warehouse-priority";
 import { transitDays } from "@/lib/vendors/transit";
+import { matchVariant } from "@/lib/vendors/match";
 import { Badge } from "./Badge";
 import { Button } from "./Button";
 
@@ -29,29 +30,17 @@ type Props = {
   consolidationWarehouseId: string | null;
 };
 
-function matchingLine(
-  lookup: InventoryLookup,
-  color: string | null,
-  size: string | null,
-) {
-  if (lookup.status !== "ok") return null;
-  const exact = lookup.lines.find(
-    (l) =>
-      (!color || l.color?.toLowerCase() === color.toLowerCase()) &&
-      (!size || l.size?.toLowerCase() === size.toLowerCase()),
-  );
-  return exact ?? null;
-}
-
 function matchingAvailable(
   lookup: InventoryLookup,
   color: string | null,
   size: string | null,
 ): number | null {
   if (lookup.status !== "ok") return null;
-  const exact = matchingLine(lookup, color, size);
-  if (exact) return exact.quantityAvailable;
-  return lookup.lines.reduce((n, l) => n + l.quantityAvailable, 0);
+  const matched = matchVariant(lookup, color, size);
+  // If we can't find this color/size, return 0 instead of summing
+  // across all variations — the rep needs to see "we couldn't match
+  // this variant", not a fake aggregate that looks like inventory.
+  return matched?.quantityAvailable ?? 0;
 }
 
 function formatMoney(n: number | null): string {
@@ -121,10 +110,7 @@ export function LineItemRow({
     | { kind: "error"; message: string }
   >(verification ? { kind: "ok", verification } : { kind: "idle" });
 
-  const inventoryLine =
-    lookup.status === "ok"
-      ? matchingLine(lookup, line.color, line.size)
-      : null;
+  const inventoryLine = matchVariant(lookup, line.color, line.size);
   const available = matchingAvailable(lookup, line.color, line.size);
   const sufficient = available !== null && available >= line.qtyOrdered;
   const isPartial = available !== null && available > 0 && !sufficient;
