@@ -73,7 +73,7 @@ export async function fetchCutterBuckInventory(
     throw wrapped;
   }
 
-  return mapCutterBuckInventory(response);
+  return mapCutterBuckInventory(response, productId);
 }
 
 // Defensive mapping: PromoStandards 1.2.1 Inventory uses
@@ -120,7 +120,10 @@ function asArray<T>(v: T | T[] | undefined | null): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
-function mapCutterBuckInventory(raw: unknown): InventoryLine[] {
+function mapCutterBuckInventory(
+  raw: unknown,
+  productId: string,
+): InventoryLine[] {
   const root = raw as {
     Inventory?: {
       // 1.2.1 shape
@@ -139,6 +142,20 @@ function mapCutterBuckInventory(raw: unknown): InventoryLine[] {
     ),
     ...asArray(root.Inventory?.PartInventoryArray?.PartInventory),
   ];
+
+  // One-shot diagnostic: if our two known shapes don't match, dump the
+  // raw response so we can see what C&B actually sent and update the
+  // mapper. Removable once the shape is confirmed.
+  if (variations.length === 0) {
+    try {
+      console.log(
+        `[cb] empty parse for productId=${productId}, raw response:`,
+        JSON.stringify(raw, null, 2).slice(0, 4000),
+      );
+    } catch {
+      console.log(`[cb] empty parse for productId=${productId} (unstringifiable)`);
+    }
+  }
 
   const asOf = new Date().toISOString();
 
