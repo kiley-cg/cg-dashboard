@@ -182,6 +182,25 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
   const totalCharge = Number(charges?.MonetaryValue ?? "0");
   const currency = charges?.CurrencyCode ?? "USD";
 
+  // When we asked for negotiated rates (account number present + indicator
+  // sent) but UPS didn't return them, dump enough of the response to
+  // diagnose: most often this means the dev-portal app doesn't have
+  // negotiated rates enabled, or the account isn't on file with a
+  // contract. Surfaced so we don't have to guess from a "list rate" badge.
+  if (accountNumber && !negotiated) {
+    console.warn("[ups] negotiated rates not returned despite account number", {
+      accountNumber: `***${accountNumber.slice(-4)}`,
+      fromZip: input.fromZip,
+      toZip: input.toZip,
+      requestSentNegotiatedIndicator: true,
+      responseHadNegotiatedRateCharges: !!rated.NegotiatedRateCharges,
+      responseTotalCharge: list?.MonetaryValue,
+      // First ~2KB of the rated-shipment JSON so we can see what UPS
+      // actually included (top-level keys are the diagnostic part).
+      ratedShipmentSnippet: JSON.stringify(rated).slice(0, 2000),
+    });
+  }
+
   const transitStr =
     rated.TimeInTransit?.ServiceSummary?.EstimatedArrival?.BusinessDaysInTransit;
   const parsedTransit = transitStr != null ? Number(transitStr) : NaN;
