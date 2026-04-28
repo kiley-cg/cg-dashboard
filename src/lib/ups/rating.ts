@@ -23,7 +23,12 @@ export type RateEstimate = {
 };
 
 const DEFAULT_DIMENSIONS_IN = { length: 24, width: 16, height: 16 };
-const MAX_PACKAGE_LBS = 70; // split across packages above this for cleaner rate quotes
+// UPS auto-applies an "Additional Handling" surcharge (~$26/package
+// at list rate) on any package with actual weight > 50 lbs. Splitting
+// at 50 lb cap avoids the trigger entirely, which matches how the
+// decorators actually pack. Cap is intentionally per-package weight,
+// not the legal max (UPS allows up to 150 lb/package).
+const MAX_PACKAGE_LBS = 50;
 
 function splitIntoPackages(totalLbs: number): number {
   if (totalLbs <= 0) return 1;
