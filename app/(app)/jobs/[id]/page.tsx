@@ -233,9 +233,11 @@ export default async function JobPage({ params, searchParams }: Props) {
                 {s.weight.totalWeightLbs} lbs · {s.estimate.packages} pkg
                 {s.estimate.transitDays != null
                   ? ` · ~${s.estimate.transitDays}-day transit`
-                  : ""}{" "}
-                · {s.estimate.isNegotiated ? "negotiated rate" : "list rate"}.
-                Vendor → decorator leg is free over $200; this is the only
+                  : ""}
+                {s.estimate.isNegotiated
+                  ? " · negotiated rate"
+                  : ` · list rate × ${s.estimate.calibrationFactor.toFixed(2)} calibration (raw $${s.estimate.rawTotalCharge.toFixed(2)})`}
+                . Vendor → decorator leg is free over $200; this is the only
                 freight CG pays.
               </p>
             </>

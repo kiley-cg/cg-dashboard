@@ -17,10 +17,28 @@ export type RateEstimate = {
   serviceName: string;
   packages: number;
   totalCharge: number;
+  // Pre-calibration list rate from UPS, kept for tooltip transparency
+  // when a calibration factor is applied.
+  rawTotalCharge: number;
+  calibrationFactor: number;
   currency: string;
   transitDays: number | null;
   isNegotiated: boolean;
 };
+
+// Default calibration factor derived from one real invoice:
+//   Job 32268: actual $167.58 / our estimate $253.35 = 0.661.
+// Override via UPS_RATE_CALIBRATION env var. Reset to "1" once UPS
+// starts returning negotiated rates, since the multiplier becomes
+// double-counting at that point.
+const DEFAULT_CALIBRATION = 0.66;
+
+function calibrationFactor(): number {
+  const raw = process.env.UPS_RATE_CALIBRATION?.trim();
+  if (!raw) return DEFAULT_CALIBRATION;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_CALIBRATION;
+}
 
 const DEFAULT_DIMENSIONS_IN = { length: 24, width: 16, height: 16 };
 // UPS auto-applies an "Additional Handling" surcharge (~$26/package
@@ -184,8 +202,14 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
   const negotiated = rated.NegotiatedRateCharges?.TotalCharge;
   const list = rated.TotalCharges;
   const charges = negotiated ?? list;
-  const totalCharge = Number(charges?.MonetaryValue ?? "0");
+  const rawTotalCharge = Number(charges?.MonetaryValue ?? "0");
   const currency = charges?.CurrencyCode ?? "USD";
+  // Apply the calibration factor only when we're falling back to list
+  // rates. If UPS returned negotiated rates, the number is already
+  // CG-specific and we shouldn't multiply it.
+  const factor = negotiated ? 1 : calibrationFactor();
+  const totalCharge =
+    Math.round((rawTotalCharge * factor + Number.EPSILON) * 100) / 100;
 
   // When we asked for negotiated rates (account number present + indicator
   // sent) but UPS didn't return them, dump enough of the response to
@@ -226,6 +250,8 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
     serviceName: rated.Service?.Description ?? "Ground",
     packages: packageCount,
     totalCharge,
+    rawTotalCharge,
+    calibrationFactor: factor,
     currency,
     transitDays: Number.isFinite(parsedTransit) ? parsedTransit : null,
     isNegotiated: !!negotiated,
