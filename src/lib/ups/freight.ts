@@ -10,6 +10,10 @@ export type FreightLineInput = {
 
 export type FreightShipmentInput = {
   fromWarehouse: { id: string; name?: string };
+  // Optional explicit origin zip. When provided, bypasses the
+  // warehouse-zip lookup — used for non-warehouse origins like contract
+  // decorators that aren't in the vendor warehouse table.
+  fromZip?: string;
   lines: FreightLineInput[];
 };
 
@@ -90,7 +94,7 @@ export async function estimateFreight(
   // failures separately so a single warehouse error doesn't kill the total.
   const settled = await Promise.all(
     input.shipments.map(async (s) => {
-      const fromZip = warehouseZip(s.fromWarehouse);
+      const fromZip = s.fromZip ?? warehouseZip(s.fromWarehouse);
       const warehouseName = s.fromWarehouse.name ?? s.fromWarehouse.id;
       if (!fromZip) {
         return {

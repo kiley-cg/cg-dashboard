@@ -6,17 +6,27 @@ import {
   autoVerifyClean,
   findVerificationsForJob,
 } from "@/lib/db/verifications";
-import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit, warehouseRank } from "@/lib/vendors/warehouse-priority";
+import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit } from "@/lib/vendors/warehouse-priority";
 import { estimateFreight, type FreightShipmentInput } from "@/lib/ups/freight";
 import { LineItemRow } from "@/components/LineItemRow";
 import { Badge } from "@/components/Badge";
+import {
+  DECORATORS,
+  DEFAULT_DECORATOR_ID,
+  decoratorById,
+} from "@/lib/decorators";
 
 type Props = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ decorator?: string }>;
 };
 
-export default async function JobPage({ params }: Props) {
+const CG_HOME_ZIP = "98512";
+
+export default async function JobPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const { decorator: decoratorParam } = await searchParams;
+  const decorator = decoratorById(decoratorParam ?? DEFAULT_DECORATOR_ID);
   const session = await auth();
   const userId = session?.user?.id;
 
@@ -76,23 +86,14 @@ export default async function JobPage({ params }: Props) {
     });
   }
 
-  // Job-level consolidated freight estimate: pretend every line ships
-  // from ONE warehouse to the job's destination, regardless of actual
-  // stock allocation. This is the apples-to-apples number to compare
-  // against a vendor invoice (vendors consolidate from their nearest
-  // stocked warehouse). The per-SO cards keep showing real
-  // split-allocation freight, which can be 1.5–2× higher when stock
-  // splits across distant warehouses.
-  const consolidatedFreight = await (async () => {
+  // Decorator → CG return-leg freight estimate. Vendors ship blanks to
+  // the decorator free over $200, but the decorator → CG (98512) leg is
+  // on CG's UPS account. That's the only freight CG actually pays, and
+  // it's what this number quotes. The per-SO vendor-warehouse → ship-to
+  // numbers below are informational (vendor's approximate cost).
+  const decoratorFreight = await (async () => {
     const allLines: { qtyOrdered: number; pieceWeightLbs: number | null }[] =
       [];
-    const allWarehousesById = new Map<
-      string,
-      { id: string; name?: string }
-    >();
-    const jobShipToZip =
-      (salesOrders[0]?.ship_to as { zip?: string } | undefined)?.zip ?? null;
-
     for (const { rows } of enriched) {
       for (const { line, lookup } of rows) {
         if (lookup.status !== "ok") continue;
@@ -108,22 +109,18 @@ export default async function JobPage({ params }: Props) {
           qtyOrdered: line.qtyOrdered,
           pieceWeightLbs: matched.pieceWeightLbs ?? null,
         });
-        for (const w of matched.warehouses ?? []) {
-          if (!allWarehousesById.has(w.id)) {
-            allWarehousesById.set(w.id, { id: w.id, name: w.name });
-          }
-        }
       }
     }
-    if (allLines.length === 0 || allWarehousesById.size === 0) return null;
-    const ranked = Array.from(allWarehousesById.values()).sort(
-      (a, b) =>
-        warehouseRank(a, jobShipToZip) - warehouseRank(b, jobShipToZip),
-    );
-    const fromWarehouse = ranked[0];
+    if (allLines.length === 0) return null;
     return estimateFreight({
-      toZip: jobShipToZip,
-      shipments: [{ fromWarehouse, lines: allLines }],
+      toZip: CG_HOME_ZIP,
+      shipments: [
+        {
+          fromWarehouse: { id: `decorator-${decorator.id}`, name: decorator.name },
+          fromZip: decorator.zip,
+          lines: allLines,
+        },
+      ],
     });
   })();
 
@@ -154,32 +151,68 @@ export default async function JobPage({ params }: Props) {
         {job.status && <Badge tone="neutral">{job.status}</Badge>}
       </div>
 
-      {consolidatedFreight?.status === "ok" && (() => {
-        const s = consolidatedFreight.shipments[0];
-        return (
-          <div className="bg-white border border-cg-n-200 rounded-card p-4 mb-6 shadow-sm">
-            <p className="text-cg-n-500 text-xs uppercase tracking-wider font-semibold">
-              Vendor-invoice comparison · consolidated to one warehouse
-            </p>
-            <p className="text-2xl font-bold mt-1 tabular-nums">
-              {consolidatedFreight.totalCharge.toLocaleString("en-US", {
-                style: "currency",
-                currency: consolidatedFreight.currency,
-              })}
-            </p>
-            <p className="text-cg-n-500 text-xs mt-1">
-              If everything shipped from {s.warehouseName} ({s.fromZip}):{" "}
-              {s.weight.totalQty.toLocaleString()} pcs ·{" "}
-              {s.weight.totalWeightLbs} lbs · {s.estimate.packages} pkg
-              {s.estimate.transitDays != null
-                ? ` · ~${s.estimate.transitDays}-day transit`
-                : ""}{" "}
-              · {s.estimate.isNegotiated ? "negotiated rate" : "list rate"}.
-              Per-SO cards below reflect actual split allocations.
-            </p>
+      <div className="bg-white border border-cg-n-200 rounded-card p-4 mb-6 shadow-sm">
+        <div className="flex items-baseline justify-between gap-4 flex-wrap">
+          <p className="text-cg-n-500 text-xs uppercase tracking-wider font-semibold">
+            Return freight · decorator → CG (98512)
+          </p>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-cg-n-500">Decorator:</span>
+            {DECORATORS.map((d) => {
+              const active = d.id === decorator.id;
+              return (
+                <Link
+                  key={d.id}
+                  href={`/jobs/${id}?decorator=${d.id}`}
+                  className={
+                    active
+                      ? "text-cg-red font-semibold underline"
+                      : "text-cg-n-500 hover:text-cg-n-900"
+                  }
+                >
+                  {d.name}
+                </Link>
+              );
+            })}
           </div>
-        );
-      })()}
+        </div>
+        {decoratorFreight?.status === "ok" ? (() => {
+          const s = decoratorFreight.shipments[0];
+          return (
+            <>
+              <p className="text-2xl font-bold mt-1 tabular-nums">
+                {decoratorFreight.totalCharge.toLocaleString("en-US", {
+                  style: "currency",
+                  currency: decoratorFreight.currency,
+                })}
+              </p>
+              <p className="text-cg-n-500 text-xs mt-1">
+                {decorator.name} ({decorator.zip}) → CG ({CG_HOME_ZIP}):{" "}
+                {s.weight.totalQty.toLocaleString()} pcs ·{" "}
+                {s.weight.totalWeightLbs} lbs · {s.estimate.packages} pkg
+                {s.estimate.transitDays != null
+                  ? ` · ~${s.estimate.transitDays}-day transit`
+                  : ""}{" "}
+                · {s.estimate.isNegotiated ? "negotiated rate" : "list rate"}.
+                Vendor → decorator leg is free over $200; this is the only
+                freight CG pays.
+              </p>
+            </>
+          );
+        })() : decoratorFreight?.status === "skipped" ? (
+          <p className="text-cg-n-400 text-xs mt-1">
+            Freight estimate: {decoratorFreight.reason}
+          </p>
+        ) : decoratorFreight?.status === "error" ? (
+          <p className="text-cg-danger text-xs mt-1" title={decoratorFreight.message}>
+            Freight estimate failed (hover for details)
+          </p>
+        ) : (
+          <p className="text-cg-n-400 text-xs mt-1">
+            No quotable lines yet.
+          </p>
+        )}
+      </div>
 
       <div className="space-y-8">
         {enriched.length === 0 && (
