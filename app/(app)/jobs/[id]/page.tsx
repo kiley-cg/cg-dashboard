@@ -18,15 +18,28 @@ import {
 
 type Props = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ decorator?: string }>;
+  searchParams: Promise<{
+    decorator?: string;
+    costs?: string;
+    freight?: string;
+  }>;
 };
 
 const CG_HOME_ZIP = "98512";
 
+function flagOn(v: string | undefined): boolean {
+  return v === "1" || v === "true";
+}
+
 export default async function JobPage({ params, searchParams }: Props) {
   const { id } = await params;
-  const { decorator: decoratorParam } = await searchParams;
-  const decorator = decoratorById(decoratorParam ?? DEFAULT_DECORATOR_ID);
+  const sp = await searchParams;
+  const decorator = decoratorById(sp.decorator ?? DEFAULT_DECORATOR_ID);
+  const includeCosts = flagOn(sp.costs);
+  // Freight estimation needs accurate per-piece weights, so freight=1
+  // implies weights=1 even when costs=0.
+  const includeFreight = flagOn(sp.freight);
+  const includeWeights = includeFreight;
   const session = await auth();
   const userId = session?.user?.id;
 
@@ -58,7 +71,9 @@ export default async function JobPage({ params, searchParams }: Props) {
     salesOrders.map(async (so) => {
       const flat = flattenLines(so.line_items);
       const lookups = await Promise.all(
-        flat.map((line) => lookupInventory(line)),
+        flat.map((line) =>
+          lookupInventory(line, { includeCosts, includeWeights }),
+        ),
       );
       return {
         salesOrder: so,
@@ -91,7 +106,8 @@ export default async function JobPage({ params, searchParams }: Props) {
   // on CG's UPS account. That's the only freight CG actually pays, and
   // it's what this number quotes. The per-SO vendor-warehouse → ship-to
   // numbers below are informational (vendor's approximate cost).
-  const decoratorFreight = await (async () => {
+  // Gated on ?freight=1 so availability-only checks skip the UPS call.
+  const decoratorFreight = !includeFreight ? null : await (async () => {
     const allLines: { qtyOrdered: number; pieceWeightLbs: number | null }[] =
       [];
     for (const { rows } of enriched) {
@@ -151,31 +167,70 @@ export default async function JobPage({ params, searchParams }: Props) {
         {job.status && <Badge tone="neutral">{job.status}</Badge>}
       </div>
 
-      <div className="bg-white border border-cg-n-200 rounded-card p-4 mb-6 shadow-sm">
-        <div className="flex items-baseline justify-between gap-4 flex-wrap">
-          <p className="text-cg-n-500 text-xs uppercase tracking-wider font-semibold">
-            Return freight · decorator → CG (98512)
-          </p>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-cg-n-500">Decorator:</span>
-            {DECORATORS.map((d) => {
-              const active = d.id === decorator.id;
-              return (
+      {(() => {
+        const buildHref = (overrides: {
+          costs?: boolean;
+          freight?: boolean;
+          decorator?: string;
+        }) => {
+          const next = new URLSearchParams();
+          const c = overrides.costs ?? includeCosts;
+          const f = overrides.freight ?? includeFreight;
+          const d = overrides.decorator ?? decorator.id;
+          if (c) next.set("costs", "1");
+          if (f) next.set("freight", "1");
+          if (d !== DEFAULT_DECORATOR_ID) next.set("decorator", d);
+          const qs = next.toString();
+          return `/jobs/${id}${qs ? `?${qs}` : ""}`;
+        };
+        return (
+          <div className="bg-white border border-cg-n-200 rounded-card p-4 mb-6 shadow-sm">
+            <div className="flex items-baseline justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-cg-n-500 uppercase tracking-wider font-semibold">
+                  Show:
+                </span>
                 <Link
-                  key={d.id}
-                  href={`/jobs/${id}?decorator=${d.id}`}
+                  href={buildHref({ costs: !includeCosts })}
                   className={
-                    active
-                      ? "text-cg-red font-semibold underline"
-                      : "text-cg-n-500 hover:text-cg-n-900"
+                    includeCosts
+                      ? "text-white bg-cg-red px-2 py-1 rounded font-semibold"
+                      : "text-cg-n-500 border border-cg-n-200 px-2 py-1 rounded hover:text-cg-n-900"
                   }
                 >
-                  {d.name}
+                  Costs {includeCosts ? "on" : "off"}
                 </Link>
-              );
-            })}
-          </div>
-        </div>
+                <Link
+                  href={buildHref({ freight: !includeFreight })}
+                  className={
+                    includeFreight
+                      ? "text-white bg-cg-red px-2 py-1 rounded font-semibold"
+                      : "text-cg-n-500 border border-cg-n-200 px-2 py-1 rounded hover:text-cg-n-900"
+                  }
+                >
+                  Freight {includeFreight ? "on" : "off"}
+                </Link>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-cg-n-500">Decorator:</span>
+                {DECORATORS.map((d) => {
+                  const active = d.id === decorator.id;
+                  return (
+                    <Link
+                      key={d.id}
+                      href={buildHref({ decorator: d.id })}
+                      className={
+                        active
+                          ? "text-cg-red font-semibold underline"
+                          : "text-cg-n-500 hover:text-cg-n-900"
+                      }
+                    >
+                      {d.name}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
         {decoratorFreight?.status === "ok" ? (() => {
           const s = decoratorFreight.shipments[0];
           return (
@@ -207,12 +262,18 @@ export default async function JobPage({ params, searchParams }: Props) {
           <p className="text-cg-danger text-xs mt-1" title={decoratorFreight.message}>
             Freight estimate failed (hover for details)
           </p>
+        ) : !includeFreight ? (
+          <p className="text-cg-n-400 text-xs mt-1">
+            Freight off. Toggle on above to quote decorator → CG.
+          </p>
         ) : (
           <p className="text-cg-n-400 text-xs mt-1">
             No quotable lines yet.
           </p>
         )}
-      </div>
+          </div>
+        );
+      })()}
 
       <div className="space-y-8">
         {enriched.length === 0 && (
@@ -352,10 +413,12 @@ export default async function JobPage({ params, searchParams }: Props) {
             fromWarehouse: s.warehouse,
             lines: s.lines,
           }));
-          const freight = await estimateFreight({
-            toZip: shipToZip,
-            shipments,
-          });
+          const freight = !includeFreight
+            ? ({ status: "skipped", reason: "Freight off — toggle 'Freight' above to quote." } as const)
+            : await estimateFreight({
+                toZip: shipToZip,
+                shipments,
+              });
 
           return (
           <div

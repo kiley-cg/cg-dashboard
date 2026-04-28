@@ -131,6 +131,7 @@ async function getStyleId(
 
 export async function fetchSSInventory(
   productId: string,
+  opts: { includeCosts?: boolean; includeWeights?: boolean } = {},
 ): Promise<InventoryLine[]> {
   const accountNumber = process.env.SS_WS_ID?.trim();
   const apiKey = process.env.SS_WS_PASSWORD?.trim();
@@ -180,10 +181,13 @@ export async function fetchSSInventory(
       `S&S returned no products for style "${productId}" (styleID ${styleID}).`,
     );
   }
-  return mapSSProducts(data);
+  return mapSSProducts(data, opts);
 }
 
-function mapSSProducts(raw: unknown): InventoryLine[] {
+function mapSSProducts(
+  raw: unknown,
+  opts: { includeCosts?: boolean; includeWeights?: boolean },
+): InventoryLine[] {
   const products: SSProduct[] = Array.isArray(raw) ? (raw as SSProduct[]) : [];
   const asOf = new Date().toISOString();
 
@@ -196,21 +200,27 @@ function mapSSProducts(raw: unknown): InventoryLine[] {
         }))
       : [];
 
+    // S&S bundles costs and weights into the inventory response, so
+    // there's no API call to skip — but we still drop those fields
+    // when the caller didn't ask for them, to keep the UI consistent
+    // with availability-only mode and avoid implying confidence in
+    // numbers the user wasn't intending to surface.
     return {
       color: p.colorName ?? p.color ?? null,
       size: p.sizeName ?? p.size ?? null,
       quantityAvailable: toNum(p.qty),
-      // S&S returns multiple price fields per SKU; prefer the contracted
-      // yourPrice, fall back to customerPrice, then sale, then piece.
-      yourCost:
-        toPrice(p.yourPrice) ??
-        toPrice(p.customerPrice) ??
-        toPrice(p.salePrice) ??
-        toPrice(p.piecePrice),
-      msrp: toPrice(p.piecePrice),
-      casePrice: toPrice(p.casePrice),
-      salePrice: toPrice(p.salePrice),
-      pieceWeightLbs: toPrice(p.weight) ?? toPrice(p.pieceWeight),
+      yourCost: opts.includeCosts
+        ? toPrice(p.yourPrice) ??
+          toPrice(p.customerPrice) ??
+          toPrice(p.salePrice) ??
+          toPrice(p.piecePrice)
+        : null,
+      msrp: opts.includeCosts ? toPrice(p.piecePrice) : null,
+      casePrice: opts.includeCosts ? toPrice(p.casePrice) : null,
+      salePrice: opts.includeCosts ? toPrice(p.salePrice) : null,
+      pieceWeightLbs: opts.includeWeights
+        ? toPrice(p.weight) ?? toPrice(p.pieceWeight)
+        : null,
       warehouses: warehouses.length ? warehouses : undefined,
       asOf,
     };

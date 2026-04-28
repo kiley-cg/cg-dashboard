@@ -29,6 +29,10 @@ async function getClient(): Promise<soap.Client> {
 
 export async function fetchCutterBuckInventory(
   productId: string,
+  // C&B has no pricing or weight calls wired yet; opts is accepted for
+  // signature parity with sanmar/ss adapters and to avoid a future
+  // refactor when getConfigurationAndPricing is added.
+  _opts: { includeCosts?: boolean; includeWeights?: boolean } = {},
 ): Promise<InventoryLine[]> {
   const id = process.env.CB_WS_ID?.trim();
   const password = process.env.CB_WS_PASSWORD?.trim();

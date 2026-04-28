@@ -20,6 +20,7 @@ function priceKey(color: string | null, size: string | null): string {
 
 export async function fetchSanMarInventory(
   productId: string,
+  opts: { includeCosts?: boolean; includeWeights?: boolean } = {},
 ): Promise<InventoryLine[]> {
   const id = process.env.SANMAR_WS_ID;
   const password = process.env.SANMAR_WS_PASSWORD;
@@ -27,9 +28,9 @@ export async function fetchSanMarInventory(
     throw new Error("SANMAR_WS_ID and SANMAR_WS_PASSWORD must be set");
   }
 
-  // Inventory, pricing, and per-piece weights run in parallel. Pricing
-  // and weights are optional — they require SANMAR_CUSTOMER_NUMBER and
-  // failures are logged but never block the inventory result.
+  // Inventory always runs; pricing and weight are separate SOAP calls
+  // gated by the caller (page reads ?costs=1 and ?freight=1). Skipping
+  // them on availability-only checks shaves ~1.5s per style on average.
   const [raw, prices, weights] = await Promise.all([
     getInventoryLevels({
       wsdlUrl: process.env.SANMAR_WSDL_URL ?? DEFAULT_WSDL,
@@ -37,20 +38,24 @@ export async function fetchSanMarInventory(
       password,
       productId,
     }),
-    fetchSanMarPricing(productId).catch((err) => {
-      console.error("[sanmar] pricing fetch failed", {
-        productId,
-        message: err instanceof Error ? err.message : String(err),
-      });
-      return [] as SanMarPriceRow[];
-    }),
-    fetchSanMarPieceWeights(productId).catch((err) => {
-      console.error("[sanmar] weight fetch failed", {
-        productId,
-        message: err instanceof Error ? err.message : String(err),
-      });
-      return [] as SanMarPieceWeightRow[];
-    }),
+    opts.includeCosts
+      ? fetchSanMarPricing(productId).catch((err) => {
+          console.error("[sanmar] pricing fetch failed", {
+            productId,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          return [] as SanMarPriceRow[];
+        })
+      : Promise.resolve([] as SanMarPriceRow[]),
+    opts.includeWeights
+      ? fetchSanMarPieceWeights(productId).catch((err) => {
+          console.error("[sanmar] weight fetch failed", {
+            productId,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          return [] as SanMarPieceWeightRow[];
+        })
+      : Promise.resolve([] as SanMarPieceWeightRow[]),
   ]);
 
   const lines = mapPromoStandardsInventory(raw);

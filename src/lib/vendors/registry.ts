@@ -24,8 +24,14 @@ function resolveVendor(supplierName: string | null): VendorCode {
   return "unknown";
 }
 
+export type LookupOptions = {
+  includeCosts?: boolean;
+  includeWeights?: boolean;
+};
+
 export async function lookupInventory(
   line: FlatLineItem,
+  opts: LookupOptions = {},
 ): Promise<InventoryLookup> {
   const vendor = resolveVendor(line.supplierName);
   const productId = line.productId;
@@ -51,10 +57,10 @@ export async function lookupInventory(
   try {
     const lines =
       vendor === "sanmar"
-        ? await fetchSanMarInventory(productId)
+        ? await fetchSanMarInventory(productId, opts)
         : vendor === "ss"
-          ? await fetchSSInventory(productId)
-          : await fetchCutterBuckInventory(productId);
+          ? await fetchSSInventory(productId, opts)
+          : await fetchCutterBuckInventory(productId, opts);
     return { status: "ok", vendor, productId, lines };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
