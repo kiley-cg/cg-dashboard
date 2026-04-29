@@ -143,10 +143,6 @@ export function LineItemRow({
     .map((w) => `${w.name ?? w.id}: ${w.quantity.toLocaleString()}`)
     .join("\n");
 
-  const onSale =
-    inventoryLine?.salePrice != null &&
-    inventoryLine.yourCost != null &&
-    inventoryLine.salePrice < inventoryLine.yourCost;
 
   const canVerify = lookup.status === "ok" && available !== null;
   const qtyConfirmed =
@@ -270,41 +266,43 @@ export function LineItemRow({
       <td className="py-3 px-4 text-right tabular-nums align-top">
         {inventoryLine ? (
           <div className="flex flex-col items-end gap-0.5 text-xs">
+            {/*
+              SanMar's distributor pages surface three prices: Original
+              Price (regular wholesale), Sale Price (current promo, when
+              present), and Program Price (CG's contracted rate). The
+              raw piecePrice from the API is MSRP/retail and not shown
+              here — reps don't quote retail.
+            */}
+            {inventoryLine.casePrice != null && (
+              <div className="inline-flex items-baseline gap-2">
+                <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
+                  Original
+                </span>
+                <span className="text-cg-n-700">
+                  {formatMoney(inventoryLine.casePrice)}
+                </span>
+              </div>
+            )}
+            {inventoryLine.salePrice != null &&
+              inventoryLine.casePrice != null &&
+              inventoryLine.salePrice < inventoryLine.casePrice && (
+                <div className="inline-flex items-baseline gap-2">
+                  <span className="text-cg-success uppercase tracking-wider text-[9px]">
+                    Sale
+                  </span>
+                  <span className="text-cg-success">
+                    {formatMoney(inventoryLine.salePrice)}
+                  </span>
+                </div>
+              )}
             <div className="inline-flex items-baseline gap-2">
               <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
-                Cost
+                Program
               </span>
               <span className="text-cg-n-900 font-semibold">
                 {formatMoney(inventoryLine.yourCost)}
               </span>
             </div>
-            {inventoryLine.msrp != null && (
-              <div className="inline-flex items-baseline gap-2">
-                <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
-                  MSRP
-                </span>
-                <span className="text-cg-n-700">
-                  {formatMoney(inventoryLine.msrp)}
-                </span>
-              </div>
-            )}
-            {inventoryLine.casePrice != null && (
-              <div className="inline-flex items-baseline gap-2">
-                <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
-                  Case
-                </span>
-                <span className="text-cg-n-500">
-                  {formatMoney(inventoryLine.casePrice)}
-                </span>
-              </div>
-            )}
-            {onSale && (
-              <span className="inline-flex items-center gap-1 mt-0.5">
-                <Badge tone="success">
-                  Sale {formatMoney(inventoryLine.salePrice)}
-                </Badge>
-              </span>
-            )}
           </div>
         ) : (
           <span className="text-cg-n-400">—</span>

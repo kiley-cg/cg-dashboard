@@ -199,10 +199,20 @@ export function computeSplit(
   return { allocations, remaining };
 }
 
+// Only consolidate when the winning warehouse ranks in the top of the
+// destination's priority list. Otherwise we'd "save a PO" by pulling
+// the entire order from across the country instead of letting most
+// lines ship from the closest warehouse and splitting off the few
+// short ones. 0/1/2 = top-three for the region (Seattle/Reno/Phoenix
+// for West, etc.).
+const CONSOLIDATION_MAX_RANK = 2;
+
 /**
  * Multi-line consolidation: find a single warehouse that can fulfill
- * every (line, available) pair from itself. Returns the highest-priority
- * such warehouse identifier, or null if no warehouse can.
+ * every (line, available) pair from itself. Returns null when no
+ * warehouse can, or when the only fulfilling warehouse is too far
+ * (the freight penalty of shipping cross-country outweighs the savings
+ * of cutting one PO instead of two).
  */
 export function pickConsolidationWarehouse(
   lines: Array<{
@@ -225,5 +235,7 @@ export function pickConsolidationWarehouse(
   );
   if (survivors.length === 0) return null;
   survivors.sort((a, b) => warehouseRank(a, zip) - warehouseRank(b, zip));
-  return survivors[0].id;
+  const winner = survivors[0];
+  if (warehouseRank(winner, zip) > CONSOLIDATION_MAX_RANK) return null;
+  return winner.id;
 }
