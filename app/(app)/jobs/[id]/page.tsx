@@ -2,6 +2,8 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { getJobBundle, flattenLines } from "@/lib/syncore/orders";
 import { lookupInventory } from "@/lib/vendors/registry";
+import type { InventoryLookup } from "@/lib/vendors/types";
+import type { FlatLineItem } from "@/lib/syncore/types";
 import {
   autoVerifyClean,
   findVerificationsForJob,
@@ -64,14 +66,32 @@ export default async function JobPage({ params, searchParams }: Props) {
 
   // Resolve inventory for every line in every sales order up front, so we can
   // fold in auto-verification before rendering the rows.
+  //
+  // Dedupe by (supplierName, productId): one SanMar/S&S/C&B SOAP call per
+  // unique style, reused across every size row on the page. A typical job
+  // has 6 colors × 5 sizes = 30 size rows for the same style; without this
+  // we'd fire 30 concurrent SOAP calls per style and the vendor would
+  // throttle ~half of them, which is exactly the "only half my rows show
+  // inventory" symptom reps were reporting.
+  const lookupCache = new Map<string, Promise<InventoryLookup>>();
+  function lookupOnce(line: FlatLineItem): Promise<InventoryLookup> {
+    // Only memoize when there's a productId AND a supplier — the no-style /
+    // unsupported branches inside lookupInventory return synchronously and
+    // don't hit the network, so caching them saves nothing.
+    if (!line.productId || !line.supplierName) {
+      return lookupInventory(line, { includeCosts, includeWeights });
+    }
+    const key = `${line.supplierName.toLowerCase()}|${line.productId}`;
+    const cached = lookupCache.get(key);
+    if (cached) return cached;
+    const pending = lookupInventory(line, { includeCosts, includeWeights });
+    lookupCache.set(key, pending);
+    return pending;
+  }
   const enriched = await Promise.all(
     salesOrders.map(async (so) => {
       const flat = flattenLines(so.line_items);
-      const lookups = await Promise.all(
-        flat.map((line) =>
-          lookupInventory(line, { includeCosts, includeWeights }),
-        ),
-      );
+      const lookups = await Promise.all(flat.map((line) => lookupOnce(line)));
       return {
         salesOrder: so,
         rows: flat.map((line, i) => ({ line, lookup: lookups[i] })),
