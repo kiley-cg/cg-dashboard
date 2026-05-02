@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { db, schema } from "./client";
 import type { FlatLineItem } from "@/lib/syncore/types";
 import type { InventoryLookup } from "@/lib/vendors/types";
+import { matchVariant } from "@/lib/vendors/match";
 
 export type VerificationDetail = {
   verifiedAt: string; // ISO string — keeps the server/client boundary clean
@@ -93,15 +94,13 @@ export async function autoVerifyClean(args: {
     for (const { line, lookup } of rows) {
       if (lookup.status !== "ok") continue;
 
-      const exact = lookup.lines.find(
-        (l) =>
-          (!line.color ||
-            l.color?.toLowerCase() === line.color.toLowerCase()) &&
-          (!line.size || l.size?.toLowerCase() === line.size.toLowerCase()),
-      );
-      const available = exact
-        ? exact.quantityAvailable
-        : lookup.lines.reduce((n, l) => n + l.quantityAvailable, 0);
+      // Use the shared matcher — never sum across variants. If we can't
+      // find this exact (color, size), don't auto-verify; surface the row
+      // so the rep can investigate. Summing produced fake "full fill"
+      // verifications that stuck around even after the matcher was fixed.
+      const matched = matchVariant(lookup, line.color, line.size);
+      if (!matched) continue;
+      const available = matched.quantityAvailable;
 
       const sufficient = available >= line.qtyOrdered;
       if (!sufficient) continue;
