@@ -65,10 +65,21 @@ export function mapPromoStandardsInventory(raw: unknown): InventoryLine[] {
       quantity: readQty(w.inventoryLocationQuantity),
     }));
 
+    // SanMar's top-level quantityAvailable for partner-brand styles
+    // (Brooks Brothers, etc.) sometimes reports 0 even when the per-
+    // warehouse rows below it total hundreds. The website renders from
+    // the warehouse rows, which match what the customer can actually
+    // pull. Mirror that: trust the warehouse sum whenever any warehouse
+    // is reporting stock; fall back to the top-level only if every
+    // warehouse is also zero.
+    const topLevel = readQty(p.quantityAvailable);
+    const warehouseSum = warehouses.reduce((n, w) => n + w.quantity, 0);
+    const quantityAvailable = warehouseSum > 0 ? warehouseSum : topLevel;
+
     return {
       color: p.partColor ?? null,
       size: p.labelSize ?? null,
-      quantityAvailable: readQty(p.quantityAvailable),
+      quantityAvailable,
       // Pricing isn't part of the PromoStandards Inventory response —
       // it comes from the separate Pricing service. The vendor wrapper
       // is responsible for merging it in if available.

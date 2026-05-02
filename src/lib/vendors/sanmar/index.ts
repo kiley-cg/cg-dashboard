@@ -60,6 +60,28 @@ export async function fetchSanMarInventory(
 
   const lines = mapPromoStandardsInventory(raw);
 
+  // Surface a one-line summary per productId: how many variants came back,
+  // total qty across them, and a sample of color/size pairs. When a rep
+  // says "SanMar shows stock for X but the app shows 0", this log answers
+  // whether the API agreed with the website at all.
+  const totalQty = lines.reduce((n, l) => n + l.quantityAvailable, 0);
+  console.log("[sanmar] inventory", {
+    productId,
+    variants: lines.length,
+    totalQty,
+    sample: lines.slice(0, 5).map((l) => ({
+      color: l.color,
+      size: l.size,
+      qty: l.quantityAvailable,
+    })),
+  });
+  if (lines.length === 0) {
+    console.log("[sanmar] empty response — raw payload", {
+      productId,
+      raw: JSON.stringify(raw).slice(0, 2000),
+    });
+  }
+
   if (prices.length > 0) {
     const priceByKey = new Map<string, SanMarPriceRow>();
     for (const p of prices) priceByKey.set(priceKey(p.color, p.size), p);
