@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { and, eq, like } from "drizzle-orm";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
@@ -13,6 +14,12 @@ const BodySchema = z.object({
   qtyConfirmed: z.number().int().nonnegative(),
   note: z.string().optional(),
   snapshot: z.unknown(),
+});
+
+const DeleteBodySchema = z.object({
+  // Either one row (salesOrderId + sizeLineId) or all rows for the job (omit both).
+  salesOrderId: z.number().optional(),
+  sizeLineId: z.number().optional(),
 });
 
 export async function POST(
@@ -57,6 +64,56 @@ export async function POST(
       note,
     });
     return NextResponse.json({ ok: true });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "failed" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const { id: jobId } = await params;
+  const parsed = DeleteBodySchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  }
+  const { salesOrderId, sizeLineId } = parsed.data;
+
+  try {
+    if (salesOrderId != null && sizeLineId != null) {
+      // Single row — used by the row-level "Re-verify" flow.
+      const result = await db
+        .delete(schema.verifications)
+        .where(
+          and(
+            eq(
+              schema.verifications.syncoreOrderId,
+              `${jobId}:${salesOrderId}`,
+            ),
+            eq(schema.verifications.syncoreLineId, String(sizeLineId)),
+          ),
+        )
+        .returning({ id: schema.verifications.id });
+      return NextResponse.json({ ok: true, deleted: result.length });
+    }
+
+    // No specifics → wipe every verification for this job.
+    // Used by the "Clear all" button when historical auto-verifies got
+    // contaminated by an old matcher bug.
+    const result = await db
+      .delete(schema.verifications)
+      .where(like(schema.verifications.syncoreOrderId, `${jobId}:%`))
+      .returning({ id: schema.verifications.id });
+    return NextResponse.json({ ok: true, deleted: result.length });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "failed" },

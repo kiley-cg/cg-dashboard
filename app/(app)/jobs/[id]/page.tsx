@@ -13,6 +13,7 @@ import { matchVariant } from "@/lib/vendors/match";
 import { estimateFreight, type FreightShipmentInput } from "@/lib/ups/freight";
 import { LineItemRow } from "@/components/LineItemRow";
 import { Badge } from "@/components/Badge";
+import { ClearVerificationsButton } from "@/components/ClearVerificationsButton";
 import { DEFAULT_DECORATOR_ID, decoratorById } from "@/lib/decorators";
 
 type Props = {
@@ -116,6 +117,26 @@ export default async function JobPage({ params, searchParams }: Props) {
         rows: e.rows,
       })),
     });
+  }
+
+  // Count rows whose verification disagrees with the live lookup. Surfaces
+  // in the "Clear all verifications" button so reps can see at a glance
+  // how many verifications were captured against bad data and need a
+  // fresh pass.
+  let staleVerificationCount = 0;
+  for (const { salesOrder, rows } of enriched) {
+    for (const { line, lookup } of rows) {
+      const v = verifications.get(`${salesOrder.id}:${line.sizeLineId}`);
+      if (!v || lookup.status !== "ok") continue;
+      const matched = matchVariant(lookup, line.color, line.size);
+      const liveAvailable = matched?.quantityAvailable ?? 0;
+      if (
+        v.qtyAvailable !== liveAvailable ||
+        (v.qtyOrdered != null && v.qtyOrdered !== line.qtyOrdered)
+      ) {
+        staleVerificationCount++;
+      }
+    }
   }
 
   // Decorator → CG return-leg freight estimate. Vendors ship blanks to
@@ -222,14 +243,22 @@ export default async function JobPage({ params, searchParams }: Props) {
                   Freight {includeFreight ? "on" : "off"}
                 </Link>
               </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-cg-n-500 uppercase tracking-wider font-semibold">
-                  Decorator:
-                </span>
-                <span className="text-cg-n-900 font-semibold">
-                  {decorator.name}
-                </span>
-                <span className="text-cg-n-500">({decorator.zip})</span>
+              <div className="flex items-center gap-4 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-cg-n-500 uppercase tracking-wider font-semibold">
+                    Decorator:
+                  </span>
+                  <span className="text-cg-n-900 font-semibold">
+                    {decorator.name}
+                  </span>
+                  <span className="text-cg-n-500">({decorator.zip})</span>
+                </div>
+                {verifications.size > 0 && (
+                  <ClearVerificationsButton
+                    jobId={id}
+                    staleCount={staleVerificationCount}
+                  />
+                )}
               </div>
             </div>
         {decoratorFreight?.status === "ok" ? (() => {

@@ -148,6 +148,20 @@ export function LineItemRow({
   const qtyConfirmed =
     available === null ? 0 : Math.min(line.qtyOrdered, available);
 
+  // A verification is "stale" when the live lookup disagrees with what was
+  // captured at verify time — either the vendor's available count moved
+  // (stock changed) or the order qty moved (CSR edit). Stale rows get a
+  // ⚠ marker + a one-click Re-verify that wipes the old row and writes a
+  // new one with current numbers. This caught us when an earlier matcher
+  // bug saved fake "full fill" verifications that survived the fix.
+  const isStale =
+    state.kind === "ok" &&
+    lookup.status === "ok" &&
+    available !== null &&
+    (state.verification.qtyAvailable !== available ||
+      (state.verification.qtyOrdered != null &&
+        state.verification.qtyOrdered !== line.qtyOrdered));
+
   async function onVerify() {
     if (!canVerify || available === null) return;
     setState({ kind: "saving" });
@@ -192,6 +206,33 @@ export function LineItemRow({
         message: body || `Verify failed (${res.status})`,
       });
     }
+  }
+
+  async function onReverify() {
+    if (!canVerify || available === null) return;
+    setState({ kind: "saving" });
+    // Wipe the stale row first so re-verify is "replace" semantics, not
+    // "append another row that masks the old one".
+    const del = await fetch(
+      `/api/jobs/${encodeURIComponent(jobId)}/verify`,
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          salesOrderId,
+          sizeLineId: line.sizeLineId,
+        }),
+      },
+    );
+    if (!del.ok) {
+      const body = await del.text().catch(() => "");
+      setState({
+        kind: "error",
+        message: body || `Re-verify failed (${del.status})`,
+      });
+      return;
+    }
+    await onVerify();
   }
 
   return (
@@ -312,9 +353,15 @@ export function LineItemRow({
         {state.kind === "ok" ? (
           <div
             className="flex flex-col items-end gap-0.5"
-            title={tooltip(state.verification)}
+            title={
+              isStale
+                ? `STALE — vendor count or order qty changed since verification.\nVerified at ${state.verification.qtyAvailable ?? "?"} available; live count is ${available}.\nOrdered at ${state.verification.qtyOrdered ?? "?"}; live order is ${line.qtyOrdered}.\n\n${tooltip(state.verification)}`
+                : tooltip(state.verification)
+            }
           >
-            <Badge tone="success">Verified</Badge>
+            <Badge tone={isStale ? "warning" : "success"}>
+              {isStale ? "Stale" : "Verified"}
+            </Badge>
             <span className="text-cg-n-500 text-[10px] tabular-nums">
               by{" "}
               {displayName(
@@ -323,6 +370,16 @@ export function LineItemRow({
               )}{" "}
               · {formatTime(state.verification.verifiedAt)}
             </span>
+            {isStale && (
+              <button
+                type="button"
+                onClick={onReverify}
+                disabled={!canVerify}
+                className="text-cg-red text-[10px] underline hover:text-cg-red/80 disabled:opacity-50"
+              >
+                Re-verify with current data
+              </button>
+            )}
           </div>
         ) : (
           <Button
