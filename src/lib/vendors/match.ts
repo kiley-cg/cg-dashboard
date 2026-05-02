@@ -35,7 +35,12 @@ const SIZE_SYNONYMS: ReadonlyArray<readonly string[]> = [
 function sizesMatch(a: string | null, b: string | null): boolean {
   const x = norm(a);
   const y = norm(b);
-  if (!x || !y) return true; // missing on either side → permissive
+  // Only permissive when BOTH sides are missing. If one side has a real
+  // value and the other is blank, they do NOT match — otherwise an
+  // aggregate/parent row in the vendor response (size=null, qty=0) will
+  // shadow the real per-variant row and the rep sees a fake 0.
+  if (!x && !y) return true;
+  if (!x || !y) return false;
   if (x === y) return true;
   for (const group of SIZE_SYNONYMS) {
     if (group.includes(x) && group.includes(y)) return true;
@@ -46,7 +51,8 @@ function sizesMatch(a: string | null, b: string | null): boolean {
 function colorsMatch(a: string | null, b: string | null): boolean {
   const x = norm(a);
   const y = norm(b);
-  if (!x || !y) return true; // missing on either side → permissive
+  if (!x && !y) return true;
+  if (!x || !y) return false;
   if (x === y) return true;
   // Token-bag: every token of the shorter side appears in the longer.
   const xt = tokens(x);
@@ -68,5 +74,19 @@ export function matchVariant(
   const lenient = lookup.lines.find(
     (l) => colorsMatch(l.color, color) && sizesMatch(l.size, size),
   );
-  return lenient ?? null;
+  if (lenient) return lenient;
+  // No match — log enough to diagnose. Reps reporting "stock should be
+  // there" can paste this and we can see whether the vendor returned the
+  // variant at all (matcher gap) or didn't (vendor data gap).
+  console.log("[match] no variant matched", {
+    productId: lookup.productId,
+    askColor: color,
+    askSize: size,
+    vendorVariants: lookup.lines.map((l) => ({
+      color: l.color,
+      size: l.size,
+      qty: l.quantityAvailable,
+    })),
+  });
+  return null;
 }
