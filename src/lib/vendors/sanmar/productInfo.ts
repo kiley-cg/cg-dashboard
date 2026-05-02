@@ -75,6 +75,22 @@ export async function fetchSanMarPieceWeights(
       ? [wrapped]
       : [];
 
+  // Probe: log the catalogColor↔color pairs SanMar returns. The Inventory
+  // (PromoStandards) call returns abbreviated color tokens like
+  // "Shad Grey Twst" while Syncore sales orders use the full catalog name
+  // "Shadow Grey Twist". Product Info exposes both forms but the docs are
+  // ambiguous about which field is which — this log resolves it
+  // empirically. Remove once we wire the mapping into matchVariant.
+  const colorPairs = Array.from(
+    new Map(
+      items.map((it) => {
+        const b = it.productBasicInfo ?? {};
+        return [`${b.catalogColor ?? ""}|${b.color ?? ""}`, b];
+      }),
+    ).values(),
+  ).map((b) => ({ catalogColor: b.catalogColor, color: b.color }));
+  console.log("[sanmar productInfo] color name pairs", { style, colorPairs });
+
   return items.map((it) => {
     const basic = it.productBasicInfo ?? {};
     return {
