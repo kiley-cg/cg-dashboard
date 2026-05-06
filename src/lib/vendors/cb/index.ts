@@ -40,10 +40,10 @@ export async function fetchCutterBuckInventory(
     throw new Error("CB_WS_ID and CB_WS_PASSWORD must be set");
   }
 
-  // C&B's docs sample only shows id/password/productID/productIDtype, but
-  // their .NET service throws NullReferenceException if localization fields
-  // are absent — they're standard on every other PromoStandards 1.2.1 call.
-  // Send both productID (their documented capital-ID form) and productId
+  // PromoStandards 1.x requires localizationCountry + localizationLanguage
+  // on every Inventory request. Their docs sample omits them but C&B's
+  // .NET service throws NullReferenceException without them. We also send
+  // both productID (capital ID, what C&B's docs show) and productId
   // (standard PromoStandards lowercase) — the WSDL serializer drops
   // whichever the schema doesn't declare.
   const client = await getClient();
@@ -58,7 +58,10 @@ export async function fetchCutterBuckInventory(
       wsVersion: "1.0.0",
       id,
       password,
+      localizationCountry: "US",
+      localizationLanguage: "en",
       productID: productId,
+      productId: productId,
       productIDtype: "Distributor",
     })) as [unknown];
   } catch (err) {
@@ -66,12 +69,18 @@ export async function fetchCutterBuckInventory(
     // about which field is null. Inline the outgoing SOAP body into the
     // error message so it surfaces in the registry's existing failure log,
     // then we can compare it against their docs sample to pin down the
-    // missing/misnamed field.
+    // missing/misnamed field. Redact credentials before logging — the
+    // raw request body contains <password> and <id> in plaintext.
     const lastRequest = (client as unknown as { lastRequest?: string })
       .lastRequest;
+    const safeRequest = lastRequest
+      ? lastRequest
+          .replace(/(<password>)[^<]*(<\/password>)/g, "$1[REDACTED]$2")
+          .replace(/(<id>)[^<]*(<\/id>)/g, "$1[REDACTED]$2")
+      : "(unavailable)";
     const baseMessage = err instanceof Error ? err.message : String(err);
     const wrapped = new Error(
-      `${baseMessage}\n--- C&B request body ---\n${lastRequest ?? "(unavailable)"}`,
+      `${baseMessage}\n--- C&B request body ---\n${safeRequest}`,
     );
     if (err instanceof Error && err.stack) wrapped.stack = err.stack;
     throw wrapped;
