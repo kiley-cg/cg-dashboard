@@ -89,30 +89,44 @@ export async function fetchCutterBuckInventory(
   return mapCutterBuckInventory(response, productId);
 }
 
-// Defensive mapping: PromoStandards 1.2.1 Inventory uses
-// ProductVariationInventoryArray.ProductVariationInventory[] with
-// partColor / labelSize / quantityAvailable, but C&B's response shape
-// hasn't been verified against live data yet. Walk both 1.2.1 and 2.0.0
-// shapes and skip silently if neither matches — empty result is safer
-// than throwing on unknown structure.
+// C&B's actual Inventory response shape (observed from a live LCK00192
+// call) doesn't follow PromoStandards 1.x or 2.x:
+//   - Variations sit at the response root, not nested under <Inventory>
+//   - Color/size are attributeColor / attributeSize (and color is a
+//     short code like "ALS", not the human-readable name)
+//   - quantityAvailable is a scalar string, not the spec'd Quantity{} obj
+//   - Warehouse identity is encoded as an AttributeFlex with name="Plant"
+//     and value="Renton" | "Hebron"
+//   - Each (color, size) appears once per (plant, validTimestamp). The
+//     future-dated rows are *projected incoming stock*, not currently
+//     available — we filter them out and aggregate only "now" rows.
+//
+// We still walk the spec-compliant shapes too, as a defensive fallback
+// in case C&B aligns with the spec on other styles.
 
-type Qty = {
-  Quantity?: { value?: number | string; uom?: string };
-  quantity?: { value?: number | string; uom?: string };
-};
-
-type Warehouse = {
-  inventoryLocationId?: string | number;
-  inventoryLocationName?: string;
-  inventoryLocationQuantity?: Qty;
-};
-
-type Variation = {
+type FlexAttr = { id?: string; name?: string; value?: string };
+type CBVariation = {
+  // C&B's observed shape:
+  partID?: string | number;
+  partDescription?: string;
+  attributeColor?: string;
+  attributeSize?: string;
+  AttributeFlexArray?: { AttributeFlex?: FlexAttr | FlexAttr[] };
+  validTimestamp?: string;
+  // Spec-compliant shape (kept for fallback):
   partColor?: string;
   labelSize?: string;
-  quantityAvailable?: Qty;
-  InventoryLocationArray?: { InventoryLocation?: Warehouse | Warehouse[] };
-  inventoryLocationArray?: { InventoryLocation?: Warehouse | Warehouse[] };
+  InventoryLocationArray?: { InventoryLocation?: SpecWarehouse | SpecWarehouse[] };
+  inventoryLocationArray?: { InventoryLocation?: SpecWarehouse | SpecWarehouse[] };
+  // Either shape may report quantityAvailable as scalar (C&B) or nested
+  // Quantity (spec). readQty handles both.
+  quantityAvailable?: number | string | { Quantity?: { value?: number | string }; quantity?: { value?: number | string } };
+};
+
+type SpecWarehouse = {
+  inventoryLocationId?: string | number;
+  inventoryLocationName?: string;
+  inventoryLocationQuantity?: { Quantity?: { value?: number | string }; quantity?: { value?: number | string } };
 };
 
 function toNum(v: unknown): number {
@@ -124,8 +138,10 @@ function toNum(v: unknown): number {
   return 0;
 }
 
-function readQty(q: Qty | undefined): number {
-  return toNum(q?.Quantity?.value ?? q?.quantity?.value);
+function readQty(q: CBVariation["quantityAvailable"]): number {
+  if (q == null) return 0;
+  if (typeof q === "number" || typeof q === "string") return toNum(q);
+  return toNum(q.Quantity?.value ?? q.quantity?.value);
 }
 
 function asArray<T>(v: T | T[] | undefined | null): T[] {
@@ -138,27 +154,28 @@ function mapCutterBuckInventory(
   productId: string,
 ): InventoryLine[] {
   const root = raw as {
+    productID?: string;
+    // C&B's observed shape: variations directly at root.
+    ProductVariationInventoryArray?: {
+      ProductVariationInventory?: CBVariation | CBVariation[];
+    };
+    // Spec-compliant shapes (defensive fallback).
     Inventory?: {
-      // 1.2.1 shape
       ProductVariationInventoryArray?: {
-        ProductVariationInventory?: Variation | Variation[];
+        ProductVariationInventory?: CBVariation | CBVariation[];
       };
-      // 2.0.0 shape — fallback in case C&B's 1.2.1 endpoint actually
-      // returns 2.0.0-shaped responses (their own docs are inconsistent).
-      PartInventoryArray?: { PartInventory?: Variation | Variation[] };
+      PartInventoryArray?: { PartInventory?: CBVariation | CBVariation[] };
     };
   };
 
   const variations = [
+    ...asArray(root.ProductVariationInventoryArray?.ProductVariationInventory),
     ...asArray(
       root.Inventory?.ProductVariationInventoryArray?.ProductVariationInventory,
     ),
     ...asArray(root.Inventory?.PartInventoryArray?.PartInventory),
   ];
 
-  // One-shot diagnostic: if our two known shapes don't match, dump the
-  // raw response so we can see what C&B actually sent and update the
-  // mapper. Removable once the shape is confirmed.
   if (variations.length === 0) {
     try {
       console.log(
@@ -168,25 +185,84 @@ function mapCutterBuckInventory(
     } catch {
       console.log(`[cb] empty parse for productId=${productId} (unstringifiable)`);
     }
+    return [];
+  }
+
+  // Group by (color, size). Each (color, size) appears once per
+  // (plant, validTimestamp). Skip future-dated rows since those are
+  // projected incoming stock, not currently shippable inventory.
+  const now = Date.now();
+  type Bucket = {
+    color: string | null;
+    size: string | null;
+    warehouses: Map<string, { name: string; quantity: number }>;
+  };
+  const buckets = new Map<string, Bucket>();
+
+  for (const v of variations) {
+    const ts = v.validTimestamp ? Date.parse(v.validTimestamp) : NaN;
+    if (Number.isFinite(ts) && ts > now) continue;
+
+    const color = v.attributeColor ?? v.partColor ?? null;
+    const size = v.attributeSize ?? v.labelSize ?? null;
+    const key = `${color}|${size}`;
+
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { color, size, warehouses: new Map() };
+      buckets.set(key, bucket);
+    }
+
+    // Resolve warehouse: prefer C&B's AttributeFlex Plant; fall back to
+    // the spec InventoryLocationArray for hypothetical spec-compliant
+    // responses.
+    const flex = asArray(v.AttributeFlexArray?.AttributeFlex);
+    const plant = flex.find((f) => f.name === "Plant")?.value ?? null;
+    const specLocs = asArray(
+      v.InventoryLocationArray?.InventoryLocation ??
+        v.inventoryLocationArray?.InventoryLocation,
+    );
+
+    if (plant) {
+      const qty = readQty(v.quantityAvailable);
+      const existing = bucket.warehouses.get(plant);
+      if (existing) existing.quantity += qty;
+      else bucket.warehouses.set(plant, { name: plant, quantity: qty });
+    } else if (specLocs.length > 0) {
+      for (const w of specLocs) {
+        const id = String(w.inventoryLocationId ?? "unknown");
+        const name = w.inventoryLocationName ?? id;
+        const qty = toNum(
+          w.inventoryLocationQuantity?.Quantity?.value ??
+            w.inventoryLocationQuantity?.quantity?.value,
+        );
+        const existing = bucket.warehouses.get(id);
+        if (existing) existing.quantity += qty;
+        else bucket.warehouses.set(id, { name, quantity: qty });
+      }
+    } else {
+      // No warehouse breakdown — record under a synthetic single bucket
+      // so the total still surfaces.
+      const qty = readQty(v.quantityAvailable);
+      const existing = bucket.warehouses.get("unknown");
+      if (existing) existing.quantity += qty;
+      else bucket.warehouses.set("unknown", { name: "Unknown", quantity: qty });
+    }
   }
 
   const asOf = new Date().toISOString();
 
-  return variations.map((p): InventoryLine => {
-    const locations = asArray(
-      p.InventoryLocationArray?.InventoryLocation ??
-        p.inventoryLocationArray?.InventoryLocation,
-    );
-    const warehouses = locations.map((w, i) => ({
-      id: String(w.inventoryLocationId ?? i),
-      name: w.inventoryLocationName,
-      quantity: readQty(w.inventoryLocationQuantity),
+  return Array.from(buckets.values()).map((b): InventoryLine => {
+    const warehouses = Array.from(b.warehouses.entries()).map(([id, w]) => ({
+      id,
+      name: w.name,
+      quantity: w.quantity,
     }));
-
+    const total = warehouses.reduce((sum, w) => sum + w.quantity, 0);
     return {
-      color: p.partColor ?? null,
-      size: p.labelSize ?? null,
-      quantityAvailable: readQty(p.quantityAvailable),
+      color: b.color,
+      size: b.size,
+      quantityAvailable: total,
       yourCost: null,
       msrp: null,
       casePrice: null,
