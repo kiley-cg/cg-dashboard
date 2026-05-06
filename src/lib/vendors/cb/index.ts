@@ -1,5 +1,9 @@
 import * as soap from "soap";
 import type { InventoryLine } from "../types";
+import {
+  fetchCutterBuckProductData,
+  type CBProductDataPart,
+} from "./productData";
 
 // Cutter & Buck PromoStandards Inventory 1.2.1.
 // Per their docs the request uses productID (capital ID) plus a
@@ -46,24 +50,35 @@ export async function fetchCutterBuckInventory(
   // both productID (capital ID, what C&B's docs show) and productId
   // (standard PromoStandards lowercase) — the WSDL serializer drops
   // whichever the schema doesn't declare.
+  //
+  // Product Data runs in parallel: the Inventory response uses
+  // abbreviated color codes (e.g. "ALS", "NVBU") which Syncore sales
+  // orders don't speak. Product Data publishes the canonical color
+  // name per partID, which we then substitute onto each inventory line.
   const client = await getClient();
   let response: unknown;
+  let productDataParts: CBProductDataPart[] = [];
   try {
-    [response] = (await client.getInventoryLevelsAsync({
-      // wsVersion must match the WSDL's targetNamespace: C&B's WSDL is
-      // labeled "InventoryService121.asmx" but its namespace is
-      // .../InventoryService/1.0.0/, and per the spec the wsVersion field
-      // matches the namespace, not the service name. Sending "1.2.1" is
-      // what triggered the .NET NRE.
-      wsVersion: "1.0.0",
-      id,
-      password,
-      localizationCountry: "US",
-      localizationLanguage: "en",
-      productID: productId,
-      productId: productId,
-      productIDtype: "Distributor",
-    })) as [unknown];
+    const [inventoryResult, productData] = await Promise.all([
+      client.getInventoryLevelsAsync({
+        // wsVersion must match the WSDL's targetNamespace: C&B's WSDL is
+        // labeled "InventoryService121.asmx" but its namespace is
+        // .../InventoryService/1.0.0/, and per the spec the wsVersion
+        // field matches the namespace, not the service name. Sending
+        // "1.2.1" is what triggered the .NET NRE.
+        wsVersion: "1.0.0",
+        id,
+        password,
+        localizationCountry: "US",
+        localizationLanguage: "en",
+        productID: productId,
+        productId: productId,
+        productIDtype: "Distributor",
+      }),
+      fetchCutterBuckProductData(productId),
+    ]);
+    response = (inventoryResult as [unknown])[0];
+    productDataParts = productData;
   } catch (err) {
     // C&B's .NET service throws "Object reference not set" with no detail
     // about which field is null. Inline the outgoing SOAP body into the
@@ -86,7 +101,7 @@ export async function fetchCutterBuckInventory(
     throw wrapped;
   }
 
-  return mapCutterBuckInventory(response, productId);
+  return mapCutterBuckInventory(response, productId, productDataParts);
 }
 
 // C&B's actual Inventory response shape (observed from a live LCK00192
@@ -152,6 +167,7 @@ function asArray<T>(v: T | T[] | undefined | null): T[] {
 function mapCutterBuckInventory(
   raw: unknown,
   productId: string,
+  productData: CBProductDataPart[] = [],
 ): InventoryLine[] {
   const root = raw as {
     productID?: string;
@@ -191,10 +207,12 @@ function mapCutterBuckInventory(
   // Group by (color, size). Each (color, size) appears once per
   // (plant, validTimestamp). Skip future-dated rows since those are
   // projected incoming stock, not currently shippable inventory.
+  // Track one partID per bucket for the Product Data lookup below.
   const now = Date.now();
   type Bucket = {
     color: string | null;
     size: string | null;
+    partID: string | null;
     warehouses: Map<string, { name: string; quantity: number }>;
   };
   const buckets = new Map<string, Bucket>();
@@ -205,12 +223,15 @@ function mapCutterBuckInventory(
 
     const color = v.attributeColor ?? v.partColor ?? null;
     const size = v.attributeSize ?? v.labelSize ?? null;
+    const partID = v.partID != null ? String(v.partID) : null;
     const key = `${color}|${size}`;
 
     let bucket = buckets.get(key);
     if (!bucket) {
-      bucket = { color, size, warehouses: new Map() };
+      bucket = { color, size, partID, warehouses: new Map() };
       buckets.set(key, bucket);
+    } else if (!bucket.partID && partID) {
+      bucket.partID = partID;
     }
 
     // Resolve warehouse: prefer C&B's AttributeFlex Plant; fall back to
@@ -250,6 +271,19 @@ function mapCutterBuckInventory(
     }
   }
 
+  // Build partID → canonical color name from Product Data so we can
+  // replace each bucket's abbreviated color code (e.g. "ALS") with the
+  // human-readable name ("Navy Blue") that Syncore sales orders use.
+  // Falls back to the raw code when Product Data has no entry, so the
+  // line still shows up in the diagnostic match log instead of being
+  // dropped silently.
+  const colorByPartID = new Map<string, string>();
+  for (const part of productData) {
+    if (part.partID && part.colorName) {
+      colorByPartID.set(part.partID, part.colorName);
+    }
+  }
+
   const asOf = new Date().toISOString();
 
   return Array.from(buckets.values()).map((b): InventoryLine => {
@@ -259,8 +293,10 @@ function mapCutterBuckInventory(
       quantity: w.quantity,
     }));
     const total = warehouses.reduce((sum, w) => sum + w.quantity, 0);
+    const canonicalColor =
+      (b.partID && colorByPartID.get(b.partID)) || b.color;
     return {
-      color: b.color,
+      color: canonicalColor,
       size: b.size,
       quantityAvailable: total,
       yourCost: null,
