@@ -15,6 +15,13 @@
       "when": 1777088283071,
       "tag": "0001_military_namor",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778500000000,
+      "tag": "0002_job_verification_clears",
+      "breakpoints": true
     }
   ]
 }

@@ -81,3 +81,16 @@ export const verifications = pgTable("verifications", {
   verifiedAt: timestamp("verified_at", { mode: "date" }).notNull().defaultNow(),
   note: text("note"),
 });
+
+// One-shot record of "rep clicked Clear all verifications on this job".
+// Presence of a row disables auto-verification for the job — once a rep
+// has explicitly wiped the verifications, they want hands-on control,
+// not the page silently re-verifying every clean row on next render.
+// Re-clicking Clear upserts the timestamp/userId for an audit trail.
+export const jobVerificationClears = pgTable("job_verification_clears", {
+  jobId: text("job_id").primaryKey(),
+  clearedAt: timestamp("cleared_at", { mode: "date" }).notNull().defaultNow(),
+  clearedByUserId: text("cleared_by_user_id")
+    .notNull()
+    .references(() => users.id),
+});

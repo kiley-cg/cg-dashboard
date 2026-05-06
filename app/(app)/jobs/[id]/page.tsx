@@ -7,6 +7,7 @@ import type { FlatLineItem } from "@/lib/syncore/types";
 import {
   autoVerifyClean,
   findVerificationsForJob,
+  isJobAutoVerifyDisabled,
 } from "@/lib/db/verifications";
 import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit } from "@/lib/vendors/warehouse-priority";
 import { matchVariant } from "@/lib/vendors/match";
@@ -102,8 +103,11 @@ export default async function JobPage({ params, searchParams }: Props) {
 
   // Hybrid: auto-verify rows where SanMar can fully fill the order; require
   // explicit click for partial fills, zero stock, or vendor errors.
+  // autoVerifyClean is a no-op when the job has been "Cleared" — see
+  // job_verification_clears in the schema.
   let verifications: Awaited<ReturnType<typeof findVerificationsForJob>> =
     new Map();
+  const autoVerifyDisabled = await isJobAutoVerifyDisabled(id);
   if (userId) {
     const existing = await findVerificationsForJob(id);
     verifications = await autoVerifyClean({
@@ -253,10 +257,11 @@ export default async function JobPage({ params, searchParams }: Props) {
                   </span>
                   <span className="text-cg-n-500">({decorator.zip})</span>
                 </div>
-                {verifications.size > 0 && (
+                {(verifications.size > 0 || autoVerifyDisabled) && (
                   <ClearVerificationsButton
                     jobId={id}
                     staleCount={staleVerificationCount}
+                    autoVerifyDisabled={autoVerifyDisabled}
                   />
                 )}
               </div>

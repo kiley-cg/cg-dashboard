@@ -70,6 +70,21 @@ export async function findVerificationsForJob(
  *  - partial fills (rep must explicitly acknowledge)
  *  - zero stock (rep must explicitly acknowledge)
  */
+/**
+ * Whether the job has been "cleared" — i.e. a rep clicked the Clear all
+ * verifications button. When true, autoVerifyClean is a no-op so reps
+ * keep manual control instead of having every clean row re-verified on
+ * the next render.
+ */
+export async function isJobAutoVerifyDisabled(jobId: string): Promise<boolean> {
+  const rows = await db
+    .select({ jobId: schema.jobVerificationClears.jobId })
+    .from(schema.jobVerificationClears)
+    .where(eq(schema.jobVerificationClears.jobId, jobId))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function autoVerifyClean(args: {
   jobId: string;
   userId: string;
@@ -84,6 +99,14 @@ export async function autoVerifyClean(args: {
   const { jobId, userId, userEmail, userName, salesOrders, alreadyVerified } =
     args;
   const result = new Map(alreadyVerified);
+
+  // Once a rep has explicitly cleared this job's verifications, never
+  // auto-verify again — they want manual control. Re-enabling auto-
+  // verify would require deleting the marker from job_verification_clears,
+  // which there's no UI for (intentional: the button is one-way).
+  if (await isJobAutoVerifyDisabled(jobId)) {
+    return result;
+  }
 
   const toInsert: Array<{
     key: string;

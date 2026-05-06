@@ -107,12 +107,27 @@ export async function DELETE(
     }
 
     // No specifics → wipe every verification for this job.
-    // Used by the "Clear all" button when historical auto-verifies got
-    // contaminated by an old matcher bug.
+    // Used by the "Clear all" button. Also record a job_verification_clears
+    // marker so autoVerifyClean stops re-creating verifications on the
+    // next render — clearing without that marker was a no-op because
+    // auto-verify ran milliseconds later and put them all back.
     const result = await db
       .delete(schema.verifications)
       .where(like(schema.verifications.syncoreOrderId, `${jobId}:%`))
       .returning({ id: schema.verifications.id });
+    await db
+      .insert(schema.jobVerificationClears)
+      .values({
+        jobId,
+        clearedByUserId: session.user.id,
+      })
+      .onConflictDoUpdate({
+        target: schema.jobVerificationClears.jobId,
+        set: {
+          clearedAt: new Date(),
+          clearedByUserId: session.user.id,
+        },
+      });
     return NextResponse.json({ ok: true, deleted: result.length });
   } catch (err) {
     return NextResponse.json(
