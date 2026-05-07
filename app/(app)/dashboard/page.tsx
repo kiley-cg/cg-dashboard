@@ -10,13 +10,21 @@ import {
 } from "@/lib/db/followups";
 import {
   deriveCsrMetrics,
+  detectWorkloadImbalance,
+  generateTalkingPoints,
+  getOldestOpenJobs,
   groupBundles,
   todayInPacific,
   type CsrMetrics,
+  type OldestJob,
+  type TalkingPoint,
 } from "./_lib/compute";
 import { CsrScorecard } from "./_components/CsrScorecard";
 import { TeamRollup } from "./_components/TeamRollup";
 import { JobsTable } from "./_components/JobsTable";
+import { TalkingPoints } from "./_components/TalkingPoints";
+import { OldestJobsList } from "./_components/OldestJobsList";
+import { ImbalanceBanner } from "./_components/ImbalanceBanner";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -104,9 +112,35 @@ export default async function DashboardPage() {
   );
 
   const allRows = bundles.flatMap((b) => b.rows);
+  const imbalance = detectWorkloadImbalance(metrics);
+  const now = new Date();
+
+  // Per-CSR talking points + oldest jobs, computed alongside the scorecard
+  // so we can render them side-by-side in the same column.
+  const enriched: Array<{
+    m: CsrMetrics;
+    bullets: TalkingPoint[];
+    oldest: OldestJob[];
+  }> = metrics.map((m) => ({
+    m,
+    bullets: generateTalkingPoints({
+      metrics: m,
+      jobFirstSeen: firstSeen,
+      todayPacific: today,
+      now,
+    }),
+    oldest: getOldestOpenJobs({
+      openRows: m.openRows,
+      jobFirstSeen: firstSeen,
+      now,
+      limit: 5,
+    }),
+  }));
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+      {imbalance && <ImbalanceBanner finding={imbalance} />}
+
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight text-cg-n-900">
@@ -129,8 +163,12 @@ export default async function DashboardPage() {
       </header>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {metrics.map((m) => (
-          <CsrScorecard key={m.csrId} m={m} />
+        {enriched.map(({ m, bullets, oldest }) => (
+          <div key={m.csrId} className="space-y-4">
+            <CsrScorecard m={m} />
+            <TalkingPoints bullets={bullets} csrName={m.csrName} />
+            <OldestJobsList jobs={oldest} csrName={m.csrName} />
+          </div>
         ))}
       </div>
 
