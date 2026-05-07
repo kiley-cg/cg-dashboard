@@ -143,14 +143,24 @@ export function LineItemRow({
     .map((w) => `${w.name ?? w.id}: ${w.quantity.toLocaleString()}`)
     .join("\n");
 
-  const onSale =
-    inventoryLine?.salePrice != null &&
-    inventoryLine.yourCost != null &&
-    inventoryLine.salePrice < inventoryLine.yourCost;
 
   const canVerify = lookup.status === "ok" && available !== null;
   const qtyConfirmed =
     available === null ? 0 : Math.min(line.qtyOrdered, available);
+
+  // A verification is "stale" when the live lookup disagrees with what was
+  // captured at verify time — either the vendor's available count moved
+  // (stock changed) or the order qty moved (CSR edit). Stale rows get a
+  // ⚠ marker + a one-click Re-verify that wipes the old row and writes a
+  // new one with current numbers. This caught us when an earlier matcher
+  // bug saved fake "full fill" verifications that survived the fix.
+  const isStale =
+    state.kind === "ok" &&
+    lookup.status === "ok" &&
+    available !== null &&
+    (state.verification.qtyAvailable !== available ||
+      (state.verification.qtyOrdered != null &&
+        state.verification.qtyOrdered !== line.qtyOrdered));
 
   async function onVerify() {
     if (!canVerify || available === null) return;
@@ -196,6 +206,33 @@ export function LineItemRow({
         message: body || `Verify failed (${res.status})`,
       });
     }
+  }
+
+  async function onReverify() {
+    if (!canVerify || available === null) return;
+    setState({ kind: "saving" });
+    // Wipe the stale row first so re-verify is "replace" semantics, not
+    // "append another row that masks the old one".
+    const del = await fetch(
+      `/api/jobs/${encodeURIComponent(jobId)}/verify`,
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          salesOrderId,
+          sizeLineId: line.sizeLineId,
+        }),
+      },
+    );
+    if (!del.ok) {
+      const body = await del.text().catch(() => "");
+      setState({
+        kind: "error",
+        message: body || `Re-verify failed (${del.status})`,
+      });
+      return;
+    }
+    await onVerify();
   }
 
   return (
@@ -268,55 +305,90 @@ export function LineItemRow({
         )}
       </td>
       <td className="py-3 px-4 text-right tabular-nums align-top">
-        {inventoryLine ? (
-          <div className="flex flex-col items-end gap-0.5 text-xs">
-            <div className="inline-flex items-baseline gap-2">
-              <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
-                Cost
-              </span>
-              <span className="text-cg-n-900 font-semibold">
-                {formatMoney(inventoryLine.yourCost)}
-              </span>
+        {(() => {
+          if (!inventoryLine) {
+            return <span className="text-cg-n-400">—</span>;
+          }
+          // Three potential prices, in display order:
+          //   - Original Price (regular wholesale, casePrice from the API)
+          //   - Sale Price     (current promo, only when below original)
+          //   - Program Price  (CG's contracted rate, yourCost)
+          // Special case: when only one of these has a value, label it
+          // "Original Price" regardless of which field it came from —
+          // the category labels only make sense when there's something
+          // to compare against. Raw piecePrice (MSRP/retail) is not shown.
+          const orig = inventoryLine.casePrice;
+          const sale = inventoryLine.salePrice;
+          const prog = inventoryLine.yourCost;
+          const saleIsLower = sale != null && orig != null && sale < orig;
+          const visibleCount =
+            (orig != null ? 1 : 0) +
+            (saleIsLower ? 1 : 0) +
+            (prog != null ? 1 : 0);
+
+          if (visibleCount === 0) {
+            return <span className="text-cg-n-400">—</span>;
+          }
+          if (visibleCount === 1) {
+            const value = (orig ?? (saleIsLower ? sale : null) ?? prog) as number;
+            return (
+              <div className="flex flex-col items-end gap-0.5 text-xs">
+                <div className="inline-flex items-baseline gap-2">
+                  <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
+                    Original Price
+                  </span>
+                  <span className="text-cg-n-900 font-semibold">
+                    {formatMoney(value)}
+                  </span>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div className="flex flex-col items-end gap-0.5 text-xs">
+              {orig != null && (
+                <div className="inline-flex items-baseline gap-2">
+                  <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
+                    Original Price
+                  </span>
+                  <span className="text-cg-n-700">{formatMoney(orig)}</span>
+                </div>
+              )}
+              {saleIsLower && sale != null && (
+                <div className="inline-flex items-baseline gap-2">
+                  <span className="text-cg-success uppercase tracking-wider text-[9px]">
+                    Sale Price
+                  </span>
+                  <span className="text-cg-success">{formatMoney(sale)}</span>
+                </div>
+              )}
+              {prog != null && (
+                <div className="inline-flex items-baseline gap-2">
+                  <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
+                    Program Price
+                  </span>
+                  <span className="text-cg-n-900 font-semibold">
+                    {formatMoney(prog)}
+                  </span>
+                </div>
+              )}
             </div>
-            {inventoryLine.msrp != null && (
-              <div className="inline-flex items-baseline gap-2">
-                <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
-                  MSRP
-                </span>
-                <span className="text-cg-n-700">
-                  {formatMoney(inventoryLine.msrp)}
-                </span>
-              </div>
-            )}
-            {inventoryLine.casePrice != null && (
-              <div className="inline-flex items-baseline gap-2">
-                <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
-                  Case
-                </span>
-                <span className="text-cg-n-500">
-                  {formatMoney(inventoryLine.casePrice)}
-                </span>
-              </div>
-            )}
-            {onSale && (
-              <span className="inline-flex items-center gap-1 mt-0.5">
-                <Badge tone="success">
-                  Sale {formatMoney(inventoryLine.salePrice)}
-                </Badge>
-              </span>
-            )}
-          </div>
-        ) : (
-          <span className="text-cg-n-400">—</span>
-        )}
+          );
+        })()}
       </td>
       <td className="py-3 px-4 text-right align-top">
         {state.kind === "ok" ? (
           <div
             className="flex flex-col items-end gap-0.5"
-            title={tooltip(state.verification)}
+            title={
+              isStale
+                ? `STALE — vendor count or order qty changed since verification.\nVerified at ${state.verification.qtyAvailable ?? "?"} available; live count is ${available}.\nOrdered at ${state.verification.qtyOrdered ?? "?"}; live order is ${line.qtyOrdered}.\n\n${tooltip(state.verification)}`
+                : tooltip(state.verification)
+            }
           >
-            <Badge tone="success">Verified</Badge>
+            <Badge tone={isStale ? "warning" : "success"}>
+              {isStale ? "Stale" : "Verified"}
+            </Badge>
             <span className="text-cg-n-500 text-[10px] tabular-nums">
               by{" "}
               {displayName(
@@ -325,6 +397,16 @@ export function LineItemRow({
               )}{" "}
               · {formatTime(state.verification.verifiedAt)}
             </span>
+            {isStale && (
+              <button
+                type="button"
+                onClick={onReverify}
+                disabled={!canVerify}
+                className="text-cg-red text-[10px] underline hover:text-cg-red/80 disabled:opacity-50"
+              >
+                Re-verify with current data
+              </button>
+            )}
           </div>
         ) : (
           <Button

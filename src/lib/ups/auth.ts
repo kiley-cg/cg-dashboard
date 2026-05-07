@@ -1,7 +1,10 @@
-// UPS OAuth 2.0 client-credentials helper. Tokens last about 4 hours; we
-// cache them in-process and refresh ~1 minute before expiry. Coalesces
-// concurrent first-load requests so we don't make a thundering herd of
-// token requests during a cold start.
+// UPS OAuth 2.0 client-credentials helper. Token lifespan is 4 hours on
+// the legacy regime and reduces to 1 hour starting Q3 2026 (per UPS dev
+// support). We honor whatever `expires_in` UPS returns and refresh ~1
+// minute before expiry, so the lifespan change requires no code change
+// — the 14400-second fallback below only fires if UPS ever omits the
+// `expires_in` field, which they don't. Coalesces concurrent first-load
+// requests so we don't fire a herd of token requests on a cold start.
 
 let tokenCache: { token: string; expiresAt: number } | null = null;
 let pending: Promise<string> | null = null;

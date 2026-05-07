@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { db, schema } from "./client";
 import type { FlatLineItem } from "@/lib/syncore/types";
 import type { InventoryLookup } from "@/lib/vendors/types";
+import { matchVariant } from "@/lib/vendors/match";
 
 export type VerificationDetail = {
   verifiedAt: string; // ISO string — keeps the server/client boundary clean
@@ -69,6 +70,21 @@ export async function findVerificationsForJob(
  *  - partial fills (rep must explicitly acknowledge)
  *  - zero stock (rep must explicitly acknowledge)
  */
+/**
+ * Whether the job has been "cleared" — i.e. a rep clicked the Clear all
+ * verifications button. When true, autoVerifyClean is a no-op so reps
+ * keep manual control instead of having every clean row re-verified on
+ * the next render.
+ */
+export async function isJobAutoVerifyDisabled(jobId: string): Promise<boolean> {
+  const rows = await db
+    .select({ jobId: schema.jobVerificationClears.jobId })
+    .from(schema.jobVerificationClears)
+    .where(eq(schema.jobVerificationClears.jobId, jobId))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function autoVerifyClean(args: {
   jobId: string;
   userId: string;
@@ -84,6 +100,14 @@ export async function autoVerifyClean(args: {
     args;
   const result = new Map(alreadyVerified);
 
+  // Once a rep has explicitly cleared this job's verifications, never
+  // auto-verify again — they want manual control. Re-enabling auto-
+  // verify would require deleting the marker from job_verification_clears,
+  // which there's no UI for (intentional: the button is one-way).
+  if (await isJobAutoVerifyDisabled(jobId)) {
+    return result;
+  }
+
   const toInsert: Array<{
     key: string;
     row: typeof schema.verifications.$inferInsert;
@@ -93,15 +117,13 @@ export async function autoVerifyClean(args: {
     for (const { line, lookup } of rows) {
       if (lookup.status !== "ok") continue;
 
-      const exact = lookup.lines.find(
-        (l) =>
-          (!line.color ||
-            l.color?.toLowerCase() === line.color.toLowerCase()) &&
-          (!line.size || l.size?.toLowerCase() === line.size.toLowerCase()),
-      );
-      const available = exact
-        ? exact.quantityAvailable
-        : lookup.lines.reduce((n, l) => n + l.quantityAvailable, 0);
+      // Use the shared matcher — never sum across variants. If we can't
+      // find this exact (color, size), don't auto-verify; surface the row
+      // so the rep can investigate. Summing produced fake "full fill"
+      // verifications that stuck around even after the matcher was fixed.
+      const matched = matchVariant(lookup, line.color, line.size);
+      if (!matched) continue;
+      const available = matched.quantityAvailable;
 
       const sufficient = available >= line.qtyOrdered;
       if (!sufficient) continue;

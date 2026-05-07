@@ -1,5 +1,5 @@
 {
-  "id": "d05e7b26-438c-4a59-86dd-3fc08286a313",
+  "id": "6fc1f523-b06a-4588-9388-ce4f50bab2cc",
   "prevId": "523575cd-7ea8-476d-86f2-86635eff7058",
   "version": "7",
   "dialect": "postgresql",
@@ -405,6 +405,52 @@
         }
       },
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.job_verification_clears": {
+      "name": "job_verification_clears",
+      "schema": "",
+      "columns": {
+        "job_id": {
+          "name": "job_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "cleared_at": {
+          "name": "cleared_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "cleared_by_user_id": {
+          "name": "cleared_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "job_verification_clears_cleared_by_user_id_user_id_fk": {
+          "name": "job_verification_clears_cleared_by_user_id_user_id_fk",
+          "tableFrom": "job_verification_clears",
+          "tableTo": "user",
+          "columnsFrom": [
+            "cleared_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

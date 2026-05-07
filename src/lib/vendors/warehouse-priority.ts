@@ -199,10 +199,19 @@ export function computeSplit(
   return { allocations, remaining };
 }
 
+// Only consolidate when the winner is the #1 closest warehouse for the
+// destination region. If even the closest warehouse can't fulfill 100%,
+// fall back to per-line picking — that way most freight still ships
+// from close, and the few short lines split off to the next-best
+// warehouse. Going further afield to "save a PO" never wins on freight.
+const CONSOLIDATION_MAX_RANK = 0;
+
 /**
  * Multi-line consolidation: find a single warehouse that can fulfill
- * every (line, available) pair from itself. Returns the highest-priority
- * such warehouse identifier, or null if no warehouse can.
+ * every (line, available) pair from itself. Returns null when no
+ * warehouse can, or when the only fulfilling warehouse isn't the
+ * closest in the region (the freight penalty of shipping cross-country
+ * outweighs the savings of cutting one PO instead of two).
  */
 export function pickConsolidationWarehouse(
   lines: Array<{
@@ -225,5 +234,22 @@ export function pickConsolidationWarehouse(
   );
   if (survivors.length === 0) return null;
   survivors.sort((a, b) => warehouseRank(a, zip) - warehouseRank(b, zip));
-  return survivors[0].id;
+  const winner = survivors[0];
+  const rank = warehouseRank(winner, zip);
+  if (rank > CONSOLIDATION_MAX_RANK) {
+    // Diagnostic: surface why we didn't consolidate. Helps prove the
+    // cap is doing its job when reps see "Ships from Seattle" + a
+    // split allocation instead of "Consolidates to single warehouse"
+    // pointing at a far DC.
+    console.log("[warehouse] consolidation skipped — winner too far", {
+      zip,
+      winnerId: winner.id,
+      winnerName: winner.name,
+      winnerRank: rank,
+      maxRank: CONSOLIDATION_MAX_RANK,
+      survivorCount: survivors.length,
+    });
+    return null;
+  }
+  return winner.id;
 }

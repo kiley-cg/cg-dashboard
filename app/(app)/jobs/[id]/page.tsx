@@ -2,15 +2,19 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { getJobBundle, flattenLines } from "@/lib/syncore/orders";
 import { lookupInventory } from "@/lib/vendors/registry";
+import type { InventoryLookup } from "@/lib/vendors/types";
+import type { FlatLineItem } from "@/lib/syncore/types";
 import {
   autoVerifyClean,
   findVerificationsForJob,
+  isJobAutoVerifyDisabled,
 } from "@/lib/db/verifications";
 import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit } from "@/lib/vendors/warehouse-priority";
 import { matchVariant } from "@/lib/vendors/match";
 import { estimateFreight, type FreightShipmentInput } from "@/lib/ups/freight";
 import { LineItemRow } from "@/components/LineItemRow";
 import { Badge } from "@/components/Badge";
+import { ClearVerificationsButton } from "@/components/ClearVerificationsButton";
 import { DEFAULT_DECORATOR_ID, decoratorById } from "@/lib/decorators";
 
 type Props = {
@@ -64,14 +68,32 @@ export default async function JobPage({ params, searchParams }: Props) {
 
   // Resolve inventory for every line in every sales order up front, so we can
   // fold in auto-verification before rendering the rows.
+  //
+  // Dedupe by (supplierName, productId): one SanMar/S&S/C&B SOAP call per
+  // unique style, reused across every size row on the page. A typical job
+  // has 6 colors × 5 sizes = 30 size rows for the same style; without this
+  // we'd fire 30 concurrent SOAP calls per style and the vendor would
+  // throttle ~half of them, which is exactly the "only half my rows show
+  // inventory" symptom reps were reporting.
+  const lookupCache = new Map<string, Promise<InventoryLookup>>();
+  function lookupOnce(line: FlatLineItem): Promise<InventoryLookup> {
+    // Only memoize when there's a productId AND a supplier — the no-style /
+    // unsupported branches inside lookupInventory return synchronously and
+    // don't hit the network, so caching them saves nothing.
+    if (!line.productId || !line.supplierName) {
+      return lookupInventory(line, { includeCosts, includeWeights });
+    }
+    const key = `${line.supplierName.toLowerCase()}|${line.productId}`;
+    const cached = lookupCache.get(key);
+    if (cached) return cached;
+    const pending = lookupInventory(line, { includeCosts, includeWeights });
+    lookupCache.set(key, pending);
+    return pending;
+  }
   const enriched = await Promise.all(
     salesOrders.map(async (so) => {
       const flat = flattenLines(so.line_items);
-      const lookups = await Promise.all(
-        flat.map((line) =>
-          lookupInventory(line, { includeCosts, includeWeights }),
-        ),
-      );
+      const lookups = await Promise.all(flat.map((line) => lookupOnce(line)));
       return {
         salesOrder: so,
         rows: flat.map((line, i) => ({ line, lookup: lookups[i] })),
@@ -81,8 +103,11 @@ export default async function JobPage({ params, searchParams }: Props) {
 
   // Hybrid: auto-verify rows where SanMar can fully fill the order; require
   // explicit click for partial fills, zero stock, or vendor errors.
+  // autoVerifyClean is a no-op when the job has been "Cleared" — see
+  // job_verification_clears in the schema.
   let verifications: Awaited<ReturnType<typeof findVerificationsForJob>> =
     new Map();
+  const autoVerifyDisabled = await isJobAutoVerifyDisabled(id);
   if (userId) {
     const existing = await findVerificationsForJob(id);
     verifications = await autoVerifyClean({
@@ -96,6 +121,26 @@ export default async function JobPage({ params, searchParams }: Props) {
         rows: e.rows,
       })),
     });
+  }
+
+  // Count rows whose verification disagrees with the live lookup. Surfaces
+  // in the "Clear all verifications" button so reps can see at a glance
+  // how many verifications were captured against bad data and need a
+  // fresh pass.
+  let staleVerificationCount = 0;
+  for (const { salesOrder, rows } of enriched) {
+    for (const { line, lookup } of rows) {
+      const v = verifications.get(`${salesOrder.id}:${line.sizeLineId}`);
+      if (!v || lookup.status !== "ok") continue;
+      const matched = matchVariant(lookup, line.color, line.size);
+      const liveAvailable = matched?.quantityAvailable ?? 0;
+      if (
+        v.qtyAvailable !== liveAvailable ||
+        (v.qtyOrdered != null && v.qtyOrdered !== line.qtyOrdered)
+      ) {
+        staleVerificationCount++;
+      }
+    }
   }
 
   // Decorator → CG return-leg freight estimate. Vendors ship blanks to
@@ -202,14 +247,23 @@ export default async function JobPage({ params, searchParams }: Props) {
                   Freight {includeFreight ? "on" : "off"}
                 </Link>
               </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-cg-n-500 uppercase tracking-wider font-semibold">
-                  Decorator:
-                </span>
-                <span className="text-cg-n-900 font-semibold">
-                  {decorator.name}
-                </span>
-                <span className="text-cg-n-500">({decorator.zip})</span>
+              <div className="flex items-center gap-4 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-cg-n-500 uppercase tracking-wider font-semibold">
+                    Decorator:
+                  </span>
+                  <span className="text-cg-n-900 font-semibold">
+                    {decorator.name}
+                  </span>
+                  <span className="text-cg-n-500">({decorator.zip})</span>
+                </div>
+                {(verifications.size > 0 || autoVerifyDisabled) && (
+                  <ClearVerificationsButton
+                    jobId={id}
+                    staleCount={staleVerificationCount}
+                    autoVerifyDisabled={autoVerifyDisabled}
+                  />
+                )}
               </div>
             </div>
         {decoratorFreight?.status === "ok" ? (() => {
@@ -266,11 +320,14 @@ export default async function JobPage({ params, searchParams }: Props) {
         )}
 
         {await Promise.all(enriched.map(async ({ salesOrder: so, rows }) => {
-          // Ship-to: use the Sales Order's destination zip when present so
-          // drop-ship orders rank warehouses from the customer's location.
-          // Falls back to CG's home zip (98512) inside warehouse-priority.
-          const shipToZip =
-            (so.ship_to as { zip?: string } | undefined)?.zip ?? null;
+          // Warehouse priority and per-SO freight are both about the
+          // vendor → decorator leg (vendors ship blanks to the decorator,
+          // not directly to the end customer), so rank against the
+          // decorator's zip — Frontier 97002, OSI 97232 — not the sales
+          // order's customer ship-to. For BB18007 with a SE customer,
+          // this is the difference between picking Jacksonville (closest
+          // to customer) and Phoenix (closest to Frontier in OR).
+          const shipToZip = decorator.zip;
 
           // Multi-line consolidation: if a single warehouse can fulfill
           // every line on this Sales Order, use it as Ships-from for every
