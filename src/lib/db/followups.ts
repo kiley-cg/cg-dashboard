@@ -172,6 +172,20 @@ function emptyCounts(): IssueCounts {
   return Object.fromEntries(ISSUE_KINDS.map((k) => [k, 0])) as IssueCounts;
 }
 
+// Postgres timestamp values come back from postgres-js as Date by default,
+// but raw SQL aggregates (MIN, etc.) and a few connection configurations
+// can leak strings/numbers through. Coerce defensively at the boundary so
+// downstream code can always call .getTime().
+function asDate(v: unknown): Date | null {
+  if (v == null) return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+  if (typeof v === "string" || typeof v === "number") {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
 /**
  * Earliest `snapshot_at` we've seen this job in any open list, used for
  * aging. Returns null if the job has never been in a snapshot.
@@ -190,7 +204,7 @@ export async function getJobFirstSeen(
     )
     .orderBy(schema.followupRows.snapshotAt)
     .limit(1);
-  return rows[0]?.snapshotAt ?? null;
+  return asDate(rows[0]?.snapshotAt);
 }
 
 /**
@@ -209,7 +223,8 @@ export async function getJobFirstSeenMap(): Promise<Map<number, Date>> {
 
   const map = new Map<number, Date>();
   for (const r of rows) {
-    if (r.first) map.set(r.jobId, r.first as Date);
+    const d = asDate(r.first);
+    if (d) map.set(r.jobId, d);
   }
   return map;
 }
@@ -261,7 +276,7 @@ export async function getMostRecentSnapshotAt(): Promise<Date | null> {
     .from(schema.followupSnapshots)
     .orderBy(desc(schema.followupSnapshots.snapshotAt))
     .limit(1);
-  return rows[0]?.at ?? null;
+  return asDate(rows[0]?.at);
 }
 
 // --- Issue heatmap data --------------------------------------------------
