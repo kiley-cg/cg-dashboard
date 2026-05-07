@@ -35,12 +35,19 @@ export const authConfig: NextAuthConfig = {
     },
     authorized({ auth: session, request }) {
       const path = request.nextUrl.pathname;
-      if (path.startsWith("/signin") || path.startsWith("/api/auth")) {
+      // Public routes that must not require a session:
+      //  - /signin and /api/auth/*: Auth.js itself
+      //  - /api/cron/*: Vercel Cron hits these with vercel-cron/1.0 and no
+      //    cookies; the route handlers verify CRON_SECRET themselves.
+      if (
+        path.startsWith("/signin") ||
+        path.startsWith("/api/auth") ||
+        path.startsWith("/api/cron")
+      ) {
         return true;
       }
       if (!session?.user) return false;
-      // /dashboard and /api/dashboard are manager-only. Cron routes have
-      // their own header-based secret check; they don't need a session.
+      // /dashboard and /api/dashboard are manager-only.
       if (path.startsWith("/dashboard") || path.startsWith("/api/dashboard")) {
         return isManager(session.user.email);
       }
