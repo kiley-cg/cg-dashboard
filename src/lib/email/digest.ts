@@ -40,6 +40,14 @@ function fromAddress(): string {
   );
 }
 
+function replyToAddress(): string | undefined {
+  // Set a Reply-To when the From address is on a sending-only subdomain
+  // (e.g. alerts@updates.colorgraphicswa.com). Replies then land at the
+  // real mailbox/group instead of bouncing on the subdomain.
+  const v = process.env.DIGEST_REPLY_TO?.trim();
+  return v && v.length > 0 ? v : undefined;
+}
+
 export async function sendCsrDigest(args: {
   metrics: CsrMetrics[];
   todayPacific: string;
@@ -59,6 +67,7 @@ export async function sendCsrDigest(args: {
   const text = renderText(args);
 
   const resend = new Resend(apiKey);
+  const replyTo = replyToAddress();
   try {
     const result = await resend.emails.send({
       from: fromAddress(),
@@ -66,6 +75,7 @@ export async function sendCsrDigest(args: {
       subject,
       html,
       text,
+      ...(replyTo ? { replyTo } : {}),
     });
     if (result.error) {
       return { ok: false, error: result.error.message ?? "Resend error" };
