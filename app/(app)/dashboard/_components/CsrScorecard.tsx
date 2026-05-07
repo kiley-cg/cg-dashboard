@@ -75,7 +75,7 @@ export function CsrScorecard({ m }: { m: CsrMetrics }) {
       </header>
 
       <div className="grid grid-cols-3 gap-3 mb-5">
-        <Stat label="Workload" value={m.workload} />
+        <Stat label="Follow-ups" value={m.workload} />
         <Stat
           label="Due today"
           value={m.dueToday}
@@ -90,11 +90,6 @@ export function CsrScorecard({ m }: { m: CsrMetrics }) {
           label="Critical/Rush"
           value={m.criticalRush}
           tone={m.staleCriticalRush > 0 ? "danger" : "neutral"}
-        />
-        <Stat
-          label="Completed today"
-          value={m.closedToday}
-          tone={m.closedToday > 0 ? "good" : "neutral"}
         />
         <Stat
           label="Stale crit/rush"

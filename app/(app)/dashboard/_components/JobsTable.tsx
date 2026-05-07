@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { schema } from "@/lib/db/client";
 import { IssueBadge, ISSUE_LABEL, issueKindFromLabel } from "./IssueBadge";
 import { ISSUE_KINDS } from "@/lib/syncore/followups";
@@ -56,6 +57,8 @@ export function JobsTable({ rows, todayPacific }: Props) {
     return Array.from(set).sort();
   }, [rows]);
 
+  const searchParams = useSearchParams();
+
   const [csrFilter, setCsrFilter] = useState<string>("");
   const [issueFilter, setIssueFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<"open" | "completed" | "all">(
@@ -63,6 +66,15 @@ export function JobsTable({ rows, todayPacific }: Props) {
   );
   const [sortKey, setSortKey] = useState<SortKey>("priority");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  // Heatmap cells link here with ?csr=…&issue=…; sync those params into local
+  // filter state so the table refilters when the user clicks one.
+  useEffect(() => {
+    const csr = searchParams.get("csr");
+    const issue = searchParams.get("issue");
+    if (csr !== null) setCsrFilter(csr);
+    if (issue !== null) setIssueFilter(issue);
+  }, [searchParams]);
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {

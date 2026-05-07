@@ -98,11 +98,10 @@ function renderText(args: {
   for (const m of args.metrics) {
     lines.push(`${m.csrName}`);
     lines.push(`  Attention score: ${m.headlineKpi} (lower is better)`);
-    lines.push(`  Workload: ${m.workload}`);
+    lines.push(`  Follow-ups: ${m.workload}`);
     lines.push(`  Due today: ${m.dueToday}`);
     lines.push(`  Overdue: ${m.overdue}`);
     lines.push(`  Critical / Critical Rush: ${m.criticalRush} (stale: ${m.staleCriticalRush})`);
-    lines.push(`  Completed today: ${m.closedToday}`);
     lines.push("");
   }
   lines.push(`Full dashboard: ${args.dashboardUrl}`);
@@ -164,12 +163,11 @@ function renderCard(m: CsrMetrics): string {
           </tr>
         </table>
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:14px;">
-          ${row("Workload", m.workload, "#212124")}
+          ${row("Follow-ups", m.workload, "#212124")}
           ${row("Due today", m.dueToday, m.dueToday > 0 ? "#D4881A" : "#212124")}
           ${row("Overdue", m.overdue, m.overdue > 0 ? "#E01B2B" : "#2B8A4A")}
           ${row("Critical / Rush", m.criticalRush, m.staleCriticalRush > 0 ? "#E01B2B" : "#212124")}
           ${row("Stale crit / rush", m.staleCriticalRush, m.staleCriticalRush > 0 ? "#E01B2B" : "#212124")}
-          ${row("Completed today", m.closedToday, m.closedToday > 0 ? "#2B8A4A" : "#212124")}
         </table>
         ${issuesList ? `<div style="margin-top:14px;">${issuesList}</div>` : ""}
       </td></tr>

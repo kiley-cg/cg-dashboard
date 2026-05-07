@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { CsrMetrics } from "../_lib/compute";
 import type { DailyTrendPoint } from "@/lib/db/followups";
 import { ISSUE_KINDS } from "@/lib/syncore/followups";
@@ -50,24 +51,41 @@ export function TeamRollup({ metrics, trends }: Props) {
                   const n = m.issueCounts[k] ?? 0;
                   // Intensity 0..1 used as a Tailwind bg-opacity proxy.
                   const intensity = n === 0 ? 0 : 0.15 + 0.85 * (n / max);
+                  const cellStyle = {
+                    backgroundColor:
+                      intensity === 0
+                        ? "#F7F7F8"
+                        : `rgba(224, 27, 43, ${intensity})`,
+                    color: intensity > 0.5 ? "white" : "#363639",
+                  };
+                  // Click-through: jump to the JobsTable below with filters
+                  // pre-applied. JobsTable reads csr/issue from search params.
+                  const href =
+                    n === 0
+                      ? null
+                      : `?csr=${encodeURIComponent(m.csrName)}&issue=${k}#jobs`;
                   return (
                     <td
                       key={k}
                       className="px-1.5 py-2 text-center"
-                      title={`${m.csrName} · ${ISSUE_LABEL[k]}: ${n}`}
+                      title={`${m.csrName} · ${ISSUE_LABEL[k]}: ${n}${n > 0 ? " — click to filter" : ""}`}
                     >
-                      <div
-                        className="rounded-md py-1.5 text-xs font-bold tabular-nums"
-                        style={{
-                          backgroundColor:
-                            intensity === 0
-                              ? "#F7F7F8"
-                              : `rgba(224, 27, 43, ${intensity})`,
-                          color: intensity > 0.5 ? "white" : "#363639",
-                        }}
-                      >
-                        {n}
-                      </div>
+                      {href ? (
+                        <Link
+                          href={href}
+                          className="block rounded-md py-1.5 text-xs font-bold tabular-nums hover:ring-2 hover:ring-cg-red-300 transition"
+                          style={cellStyle}
+                        >
+                          {n}
+                        </Link>
+                      ) : (
+                        <div
+                          className="rounded-md py-1.5 text-xs font-bold tabular-nums"
+                          style={cellStyle}
+                        >
+                          {n}
+                        </div>
+                      )}
                     </td>
                   );
                 })}

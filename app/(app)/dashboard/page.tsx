@@ -36,6 +36,17 @@ function formatRelative(d: Date | string | number): string {
   return `${days}d ago`;
 }
 
+function formatPacificTime(d: Date | string | number): string {
+  const dt = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(dt.getTime())) return "unknown";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(dt);
+}
+
 export default async function DashboardPage() {
   const session = await auth();
   if (!isManager(session?.user?.email)) {
@@ -102,9 +113,17 @@ export default async function DashboardPage() {
             CSR Performance
           </h1>
           <p className="text-sm text-cg-n-500">
-            {mostRecent
-              ? `Last updated ${formatRelative(mostRecent)} · today: ${today}`
-              : `today: ${today}`}
+            {mostRecent ? (
+              <>
+                Snapshot at{" "}
+                <span className="font-semibold text-cg-n-700">
+                  {formatPacificTime(mostRecent)}
+                </span>{" "}
+                · {formatRelative(mostRecent)} · for {today}
+              </>
+            ) : (
+              <>today: {today}</>
+            )}
           </p>
         </div>
       </header>
@@ -117,7 +136,9 @@ export default async function DashboardPage() {
 
       <TeamRollup metrics={metrics} trends={trends} />
 
-      <JobsTable rows={allRows} todayPacific={today} />
+      <div id="jobs">
+        <JobsTable rows={allRows} todayPacific={today} />
+      </div>
     </div>
   );
 }
