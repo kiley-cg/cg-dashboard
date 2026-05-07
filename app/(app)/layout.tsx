@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
+import { isManager } from "@/lib/managers";
 
 export default async function AppLayout({
   children,
@@ -8,6 +9,7 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
+  const showDashboard = isManager(session?.user?.email);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -21,6 +23,14 @@ export default async function AppLayout({
             <span className="ml-2 text-cg-n-300 text-sm">· Inventory Check</span>
           </Link>
           <div className="flex items-center gap-4 text-sm">
+            {showDashboard && (
+              <Link
+                href="/dashboard"
+                className="text-cg-n-300 hover:text-white transition"
+              >
+                Dashboard
+              </Link>
+            )}
             {session?.user?.email && (
               <span className="text-cg-n-300">{session.user.email}</span>
             )}
