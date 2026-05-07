@@ -132,6 +132,7 @@ export default async function DashboardPage() {
     oldest: getOldestOpenJobs({
       openRows: m.openRows,
       jobFirstSeen: firstSeen,
+      todayPacific: today,
       now,
       limit: 5,
     }),

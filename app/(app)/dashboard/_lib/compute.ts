@@ -68,6 +68,38 @@ function ageDays(firstSeen: Date | string | number | undefined | null, now: Date
   return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
 }
 
+// Days since the follow-up date was due. 0 if not yet due. null if no
+// fuDate or it can't be parsed. Direct measurement from Syncore — works
+// from day 1, before we've accumulated snapshot history.
+function daysOverdue(fuDate: string | null, todayPacific: string): number | null {
+  if (!fuDate) return null;
+  if (!/^\d{4}-\d{2}-\d{2}/.test(fuDate)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}/.test(todayPacific)) return null;
+  if (fuDate >= todayPacific) return 0;
+  const f = Date.parse(fuDate);
+  const t = Date.parse(todayPacific);
+  if (Number.isNaN(f) || Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((t - f) / (24 * 60 * 60 * 1000)));
+}
+
+// "How long has this job been a problem?" — combines two measurements:
+//  - Days since we first saw it on the open list (from snapshots)
+//  - Days since its follow-up date was due (from Syncore)
+// Take the max so the metric is meaningful from day 1 (relies on fuDate)
+// and gets richer as we accumulate snapshot history.
+function jobStaleDays(args: {
+  jobId: number;
+  fuDate: string | null;
+  jobFirstSeen: Map<number, Date>;
+  todayPacific: string;
+  now: Date;
+}): number | null {
+  const fromSnap = ageDays(args.jobFirstSeen.get(args.jobId), args.now);
+  const fromFu = daysOverdue(args.fuDate, args.todayPacific);
+  if (fromSnap === null && fromFu === null) return null;
+  return Math.max(fromSnap ?? 0, fromFu ?? 0);
+}
+
 function emptyIssueCounts(): IssueCounts {
   return Object.fromEntries(ISSUE_KINDS.map((k) => [k, 0])) as IssueCounts;
 }
@@ -109,7 +141,13 @@ export function deriveCsrMetrics(args: {
       if (cmp === -1) staleCriticalRush++;
     }
 
-    const age = ageDays(opts.jobFirstSeen.get(row.jobId), now);
+    const age = jobStaleDays({
+      jobId: row.jobId,
+      fuDate: row.fuDate,
+      jobFirstSeen: opts.jobFirstSeen,
+      todayPacific: today,
+      now,
+    });
     if (age === null) buckets.lt1++;
     else if (age < 1) buckets.lt1++;
     else if (age <= 3) buckets.d1to3++;
@@ -210,7 +248,13 @@ export function generateTalkingPoints(args: {
       if (!isCritical(r.priority)) continue;
       // Stale = fuDate strictly before today
       if (compareDateStrings(r.fuDate, today) !== -1) continue;
-      const age = ageDays(args.jobFirstSeen.get(r.jobId), now);
+      const age = jobStaleDays({
+        jobId: r.jobId,
+        fuDate: r.fuDate,
+        jobFirstSeen: args.jobFirstSeen,
+        todayPacific: today,
+        now,
+      });
       if (age === null) continue;
       if (!oldest || age > oldest.days) {
         oldest = { jobId: r.jobId, days: age, contact: r.contact };
@@ -222,7 +266,7 @@ export function generateTalkingPoints(args: {
     bullets.push({ tone: "alert", text });
   }
 
-  // 2. Long-aging open job — anything > 14 days on the open list
+  // 2. Long-aging open job — anything > 14 days stale
   let longest: {
     jobId: number;
     days: number;
@@ -230,7 +274,13 @@ export function generateTalkingPoints(args: {
     contact: string | null;
   } | null = null;
   for (const r of m.openRows) {
-    const age = ageDays(args.jobFirstSeen.get(r.jobId), now);
+    const age = jobStaleDays({
+      jobId: r.jobId,
+      fuDate: r.fuDate,
+      jobFirstSeen: args.jobFirstSeen,
+      todayPacific: today,
+      now,
+    });
     if (age === null || age < 14) continue;
     if (!longest || age > longest.days) {
       longest = { jobId: r.jobId, days: age, issue: r.issue, contact: r.contact };
@@ -314,14 +364,22 @@ export interface OldestJob {
 export function getOldestOpenJobs(args: {
   openRows: FollowupRow[];
   jobFirstSeen: Map<number, Date>;
+  todayPacific?: string;
   now?: Date;
   limit?: number;
 }): OldestJob[] {
   const now = args.now ?? new Date();
+  const today = args.todayPacific ?? todayInPacific();
   const limit = args.limit ?? 5;
   const enriched: OldestJob[] = [];
   for (const r of args.openRows) {
-    const days = ageDays(args.jobFirstSeen.get(r.jobId), now);
+    const days = jobStaleDays({
+      jobId: r.jobId,
+      fuDate: r.fuDate,
+      jobFirstSeen: args.jobFirstSeen,
+      todayPacific: today,
+      now,
+    });
     if (days === null) continue;
     enriched.push({
       jobId: r.jobId,
