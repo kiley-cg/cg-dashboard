@@ -80,12 +80,13 @@ export async function fetchCutterBuckInventory(
     response = (inventoryResult as [unknown])[0];
     productDataParts = productData;
   } catch (err) {
-    // C&B's .NET service throws "Object reference not set" with no detail
-    // about which field is null. Inline the outgoing SOAP body into the
-    // error message so it surfaces in the registry's existing failure log,
-    // then we can compare it against their docs sample to pin down the
-    // missing/misnamed field. Redact credentials before logging — the
-    // raw request body contains <password> and <id> in plaintext.
+    // C&B's .NET service throws "Object reference not set" both when
+    // their backend has a real bug (early on, this was the missing-
+    // localization-fields case) and when they don't recognize the
+    // productId at all (invalid/discontinued SKU). Log the full
+    // outgoing request body to Vercel for diagnosis but surface a
+    // clean, actionable message to the rep — they don't need to see
+    // the SOAP envelope.
     const lastRequest = (client as unknown as { lastRequest?: string })
       .lastRequest;
     const safeRequest = lastRequest
@@ -94,9 +95,16 @@ export async function fetchCutterBuckInventory(
           .replace(/(<id>)[^<]*(<\/id>)/g, "$1[REDACTED]$2")
       : "(unavailable)";
     const baseMessage = err instanceof Error ? err.message : String(err);
-    const wrapped = new Error(
-      `${baseMessage}\n--- C&B request body ---\n${safeRequest}`,
-    );
+    console.error("[cb] inventory request failed", {
+      productId,
+      message: baseMessage,
+      request: safeRequest,
+    });
+    const isNre = /object reference not set/i.test(baseMessage);
+    const userMessage = isNre
+      ? `Cutter & Buck couldn't process style "${productId}" — likely an invalid, discontinued, or unrecognized SKU. Verify on cbcorporate.com.`
+      : `Cutter & Buck inventory error: ${baseMessage}`;
+    const wrapped = new Error(userMessage);
     if (err instanceof Error && err.stack) wrapped.stack = err.stack;
     throw wrapped;
   }
