@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db, schema } from "./client";
 import type {
   CsrSnapshot,
@@ -77,27 +77,30 @@ export interface SnapshotWithRows {
 export async function getLatestSnapshotPerCsr(): Promise<SnapshotWithRows[]> {
   // Postgres DISTINCT ON keeps the first row per partition; ORDER BY drives
   // which one. Drizzle doesn't have a first-class DISTINCT ON helper so we
-  // use raw SQL for the snapshot pick.
-  const latest = await db.execute<{
-    id: string;
-  }>(sql`
+  // use raw SQL for the snapshot-id pick, then re-fetch via the typed query
+  // builder so column names and types come back correctly mapped.
+  const latestRaw = await db.execute<{ id: string }>(sql`
     SELECT DISTINCT ON (csr_id, follow_up_status) id
     FROM followup_snapshots
     ORDER BY csr_id, follow_up_status, snapshot_at DESC
   `);
 
-  const ids = (latest as unknown as { id: string }[]).map((r) => r.id);
+  // postgres-js returns rows as an iterable; normalize to a plain array.
+  const latestRows: { id: string }[] = Array.from(
+    latestRaw as Iterable<{ id: string }>,
+  );
+  const ids = latestRows.map((r) => r.id);
   if (ids.length === 0) return [];
 
   const snaps = await db
     .select()
     .from(schema.followupSnapshots)
-    .where(sql`${schema.followupSnapshots.id} = ANY(${ids})`);
+    .where(inArray(schema.followupSnapshots.id, ids));
 
   const rowsAll = await db
     .select()
     .from(schema.followupRows)
-    .where(sql`${schema.followupRows.snapshotId} = ANY(${ids})`);
+    .where(inArray(schema.followupRows.snapshotId, ids));
 
   const rowsBySnap = new Map<string, (typeof schema.followupRows.$inferSelect)[]>();
   for (const r of rowsAll) {
@@ -146,12 +149,16 @@ export async function getDailyTrend(opts: {
     ORDER BY date_trunc('day', snapshot_at) DESC, snapshot_at DESC
   `);
 
-  return (rows as unknown as Array<{
-    day: string;
-    total_records: number | string;
-    total_issues: number | string;
-    issue_counts: IssueCounts | null;
-  }>)
+  const arr = Array.from(
+    rows as Iterable<{
+      day: string;
+      total_records: number | string;
+      total_issues: number | string;
+      issue_counts: IssueCounts | null;
+    }>,
+  );
+
+  return arr
     .map((r) => ({
       date: r.day,
       totalRecords: Number(r.total_records),
@@ -242,8 +249,8 @@ export async function getClosedSinceLastSnapshot(opts: {
           AND cur.job_id = prev.job_id
       )
   `);
-  const first = (result as unknown as Array<{ closed: number | string }>)[0];
-  return first ? Number(first.closed) : 0;
+  const arr = Array.from(result as Iterable<{ closed: number | string }>);
+  return arr[0] ? Number(arr[0].closed) : 0;
 }
 
 // --- Recent snapshot timestamps for "Last updated" header -----------------
