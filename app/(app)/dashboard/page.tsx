@@ -23,8 +23,10 @@ export const metadata = {
   title: "CSR Performance · Color Graphics",
 };
 
-function formatRelative(d: Date): string {
-  const ms = Date.now() - d.getTime();
+function formatRelative(d: Date | string | number): string {
+  const dt = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(dt.getTime())) return "unknown";
+  const ms = Date.now() - dt.getTime();
   const min = Math.floor(ms / 60_000);
   if (min < 1) return "just now";
   if (min < 60) return `${min} min ago`;

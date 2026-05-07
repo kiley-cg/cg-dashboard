@@ -59,9 +59,12 @@ function compareDateStrings(a: string | null, b: string): -1 | 0 | 1 | null {
   return 0;
 }
 
-function ageDays(firstSeen: Date | undefined, now: Date): number | null {
-  if (!firstSeen) return null;
-  const ms = now.getTime() - firstSeen.getTime();
+function ageDays(firstSeen: Date | string | number | undefined | null, now: Date): number | null {
+  if (firstSeen == null) return null;
+  const d =
+    firstSeen instanceof Date ? firstSeen : new Date(firstSeen as string | number);
+  if (Number.isNaN(d.getTime())) return null;
+  const ms = now.getTime() - d.getTime();
   return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
 }
 
