@@ -234,96 +234,73 @@ export interface FollowUpRow {
   raw: Record<string, unknown>;
 }
 
+// Syncore returns dates in MMM/DD/YYYY format (e.g., "Jun/27/2024"). Convert
+// to ISO YYYY-MM-DD so date-string comparisons in compute.ts work as
+// expected (and so the dashboard renders consistently). If the input
+// already looks ISO, just slice off any time component. Falls back to
+// Date.parse for anything else.
+function normalizeDate(s: string | null): string | null {
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const months: Record<string, string> = {
+    jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+    jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+  };
+  const m = s.match(/^([A-Za-z]{3})[\/\-\s](\d{1,2})[\/\-\s,]+(\d{4})$/);
+  if (m) {
+    const month = months[m[1].toLowerCase()];
+    if (month) {
+      return `${m[3]}-${month}-${m[2].padStart(2, "0")}`;
+    }
+  }
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return d.toISOString().slice(0, 10);
+  }
+  return s;
+}
+
 function normalizeRow(raw: Record<string, unknown>): FollowUpRow | null {
-  // jobId is the only field we require — everything else is best-effort.
-  const jobId = pick(
-    raw,
-    ["jobId", "JobId", "job_id", "id", "JobID"],
-    asNumber,
-  );
+  // Syncore's actual shape (confirmed by inspecting raw payload):
+  //   { id: <followup-record-id>,
+  //     job: { id, url, status, priority, description, issue,
+  //            followUpDate, estimatedDeliveryDate, salesRepName,
+  //            customerServiceRepName, ... },
+  //     contact: { id, url, name },
+  //     suppliers: [{ id, url, name }, ...] }
+  //
+  // The top-level `id` is the follow-up record's own ID (millions+),
+  // NOT the job number. The user-visible job # lives at job.id and
+  // matches the deep-link path /Job/Details/{job.id}.
+  const job = (raw.job ?? {}) as Record<string, unknown>;
+  const contact = (raw.contact ?? {}) as Record<string, unknown>;
+  const suppliers = Array.isArray(raw.suppliers)
+    ? (raw.suppliers as Array<Record<string, unknown>>)
+    : [];
+
+  const jobId = asNumber(job.id);
   if (jobId === null) return null;
 
-  const fuDate = pick(
-    raw,
-    ["followUpDate", "FollowUpDate", "fuDate", "follow_up_date"],
-    asString,
-  );
-  const jobStatus =
-    pick(raw, ["jobStatus", "JobStatus", "status"], asString) ??
-    asString(pickNested(raw, ["job", "status"]));
   const supplier =
-    pick(raw, ["supplier", "Supplier", "vendor", "supplierName"], asString) ??
-    asString(pickNested(raw, ["supplier", "name"]));
-  const description =
-    pick(
-      raw,
-      [
-        "jobDescription",
-        "JobDescription",
-        "description",
-        "Description",
-        "jobName",
-      ],
-      asString,
-    ) ?? asString(pickNested(raw, ["job", "description"]));
-  const primaryRep =
-    pick(
-      raw,
-      ["primaryRep", "PrimaryRep", "primaryRepName", "salesRep", "rep"],
-      asString,
-    ) ??
-    asString(pickNested(raw, ["primaryRep", "name"])) ??
-    asString(pickNested(raw, ["salesRep", "name"]));
-  const csrName =
-    pick(
-      raw,
-      [
-        "csr",
-        "Csr",
-        "customerServiceRep",
-        "customerServiceRepName",
-        "CustomerServiceRep",
-      ],
-      asString,
-    ) ??
-    asString(pickNested(raw, ["customerServiceRep", "name"])) ??
-    asString(pickNested(raw, ["csr", "name"]));
-  const priority =
-    pick(raw, ["priority", "Priority", "jobPriority"], asString) ??
-    asString(pickNested(raw, ["priority", "name"])) ??
-    asString(pickNested(raw, ["job", "priority", "name"]));
-  const estDelivery = pick(
-    raw,
-    [
-      "estDelivery",
-      "EstDelivery",
-      "estimatedDeliveryDate",
-      "estDeliveryDate",
-      "expectedDelivery",
-    ],
-    asString,
-  );
-  const issue =
-    pick(raw, ["issue", "Issue", "issueName"], asString) ??
-    asString(pickNested(raw, ["issue", "name"]));
-  const contact =
-    pick(raw, ["contact", "Contact", "contactName", "customer"], asString) ??
-    asString(pickNested(raw, ["contact", "name"])) ??
-    asString(pickNested(raw, ["client", "businessName"])) ??
-    asString(pickNested(raw, ["client", "name"]));
+    suppliers.length > 0
+      ? suppliers
+          .map((s) => asString(s.name))
+          .filter((s): s is string => Boolean(s))
+          .join(", ") || null
+      : null;
 
   return {
     jobId,
-    fuDate,
-    contact,
-    jobStatus,
+    fuDate: normalizeDate(asString(job.followUpDate)),
+    contact: asString(contact.name),
+    jobStatus: asString(job.status),
     supplier,
-    jobDescription: description,
-    primaryRep,
-    csrName,
-    priority,
-    estDelivery,
-    issue,
+    jobDescription: asString(job.description),
+    primaryRep: asString(job.salesRepName),
+    csrName: asString(job.customerServiceRepName),
+    priority: asString(job.priority),
+    estDelivery: normalizeDate(asString(job.estimatedDeliveryDate)),
+    issue: asString(job.issue),
     raw,
   };
 }
