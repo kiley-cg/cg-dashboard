@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/snapshot-followups",
-      "schedule": "0 13,21 * * 1-5"
+      "schedule": "0 * * * 1-5"
     },
     {
       "path": "/api/cron/digest-followups",
