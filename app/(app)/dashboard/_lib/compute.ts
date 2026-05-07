@@ -380,7 +380,10 @@ export function getOldestOpenJobs(args: {
       todayPacific: today,
       now,
     });
-    if (days === null) continue;
+    // Only include jobs with measurable staleness — 0d entries are jobs
+    // that are planned for today/future and not actually neglected, so
+    // showing them defeats the point of the "oldest" panel.
+    if (days === null || days <= 0) continue;
     enriched.push({
       jobId: r.jobId,
       daysOpen: days,

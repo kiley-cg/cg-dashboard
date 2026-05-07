@@ -21,9 +21,15 @@ export function OldestJobsList({
         Oldest open jobs · {csrName}
       </h4>
       {jobs.length === 0 ? (
-        <p className="text-sm text-cg-n-500 italic">
-          No open jobs with a known first-seen date yet
-        </p>
+        <div className="rounded-md bg-green-50 px-3 py-2 flex items-start gap-2.5">
+          <span
+            className="h-2 w-2 rounded-full bg-cg-success mt-1.5 shrink-0"
+            aria-hidden
+          />
+          <span className="text-sm text-cg-success">
+            No neglected jobs &mdash; {csrName.split(" ")[0]} is current
+          </span>
+        </div>
       ) : (
         <table className="w-full text-sm">
           <thead>
