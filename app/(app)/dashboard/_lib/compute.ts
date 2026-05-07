@@ -168,4 +168,202 @@ export function todayInPacific(): string {
   }).format(new Date());
 }
 
+// --- Talking points -------------------------------------------------------
+//
+// Auto-generated 1:1-prep bullets per CSR. Rules-based — no AI.
+// The COO scans these in 10 seconds before a 1:1.
+
+export interface TalkingPoint {
+  tone: "alert" | "concern" | "win";
+  text: string;
+}
+
+const ISSUE_LABEL_LOCAL: Record<IssueKind, string> = {
+  artwork: "Artwork",
+  backOrder: "Back Order",
+  development: "Development",
+  hold: "Hold",
+  inProduction: "In Production",
+  inTransit: "In Transit",
+  needsTracking: "Needs Tracking",
+  postDelivery: "Post Delivery",
+  problem: "Problem",
+  waiting: "Waiting",
+  none: "None",
+};
+
+export function generateTalkingPoints(args: {
+  metrics: CsrMetrics;
+  jobFirstSeen: Map<number, Date>;
+  todayPacific?: string;
+  now?: Date;
+}): TalkingPoint[] {
+  const m = args.metrics;
+  const now = args.now ?? new Date();
+  const today = args.todayPacific ?? todayInPacific();
+  const bullets: TalkingPoint[] = [];
+
+  // 1. Stale Critical/Rush — most urgent. Always lead.
+  if (m.staleCriticalRush > 0) {
+    let oldest: { jobId: number; days: number; contact: string | null } | null = null;
+    for (const r of m.openRows) {
+      if (!isCritical(r.priority)) continue;
+      // Stale = fuDate strictly before today
+      if (compareDateStrings(r.fuDate, today) !== -1) continue;
+      const age = ageDays(args.jobFirstSeen.get(r.jobId), now);
+      if (age === null) continue;
+      if (!oldest || age > oldest.days) {
+        oldest = { jobId: r.jobId, days: age, contact: r.contact };
+      }
+    }
+    const text = oldest
+      ? `${m.staleCriticalRush} Critical/Rush ${m.staleCriticalRush === 1 ? "job is" : "jobs are"} overdue · oldest open ${oldest.days}d (Job #${oldest.jobId}${oldest.contact ? ` — ${oldest.contact}` : ""})`
+      : `${m.staleCriticalRush} Critical/Rush ${m.staleCriticalRush === 1 ? "job is" : "jobs are"} overdue`;
+    bullets.push({ tone: "alert", text });
+  }
+
+  // 2. Long-aging open job — anything > 14 days on the open list
+  let longest: {
+    jobId: number;
+    days: number;
+    issue: string | null;
+    contact: string | null;
+  } | null = null;
+  for (const r of m.openRows) {
+    const age = ageDays(args.jobFirstSeen.get(r.jobId), now);
+    if (age === null || age < 14) continue;
+    if (!longest || age > longest.days) {
+      longest = { jobId: r.jobId, days: age, issue: r.issue, contact: r.contact };
+    }
+  }
+  if (longest) {
+    const issuePart =
+      longest.issue && longest.issue.toLowerCase() !== "none"
+        ? ` (${longest.issue})`
+        : "";
+    const contactPart = longest.contact ? ` — ${longest.contact}` : "";
+    bullets.push({
+      tone: "alert",
+      text: `Job #${longest.jobId} has been open ${longest.days}d${issuePart}${contactPart} — long-stuck, dig in`,
+    });
+  }
+
+  // 3. High overdue total
+  if (m.overdue > 5 && bullets.length < 4) {
+    bullets.push({
+      tone: "concern",
+      text: `${m.overdue} follow-ups overdue total — clearing these first should be the priority`,
+    });
+  }
+
+  // 4. Issue concentration: one issue type owns >40% of open with non-issues
+  const totalIssues = ISSUE_KINDS.filter((k) => k !== "none").reduce(
+    (s, k) => s + (m.issueCounts[k] ?? 0),
+    0,
+  );
+  if (totalIssues >= 5 && bullets.length < 4) {
+    let dominantKind: IssueKind | null = null;
+    let dominantCount = 0;
+    for (const k of ISSUE_KINDS) {
+      if (k === "none") continue;
+      const n = m.issueCounts[k] ?? 0;
+      if (n > dominantCount) {
+        dominantCount = n;
+        dominantKind = k;
+      }
+    }
+    if (dominantKind && dominantCount / totalIssues > 0.4 && dominantCount >= 5) {
+      const pct = Math.round((dominantCount / totalIssues) * 100);
+      bullets.push({
+        tone: "concern",
+        text: `${dominantCount} ${ISSUE_LABEL_LOCAL[dominantKind]} jobs (${pct}% of issued workload) — focused chase needed`,
+      });
+    }
+  }
+
+  // 5. Heavy workload overall
+  if (m.workload > 30 && bullets.length < 4) {
+    bullets.push({
+      tone: "concern",
+      text: `${m.workload} open follow-ups — consider triaging the oldest down to ≤25`,
+    });
+  }
+
+  // 6. All clear — only if nothing else fired
+  if (bullets.length === 0 && m.workload > 0) {
+    bullets.push({
+      tone: "win",
+      text: "Nothing overdue, no stale Critical/Rush — clean slate, keep it up",
+    });
+  }
+
+  return bullets.slice(0, 5);
+}
+
+// --- Oldest open jobs -----------------------------------------------------
+
+export interface OldestJob {
+  jobId: number;
+  daysOpen: number;
+  issue: string | null;
+  priority: string | null;
+  contact: string | null;
+  jobDescription: string | null;
+}
+
+export function getOldestOpenJobs(args: {
+  openRows: FollowupRow[];
+  jobFirstSeen: Map<number, Date>;
+  now?: Date;
+  limit?: number;
+}): OldestJob[] {
+  const now = args.now ?? new Date();
+  const limit = args.limit ?? 5;
+  const enriched: OldestJob[] = [];
+  for (const r of args.openRows) {
+    const days = ageDays(args.jobFirstSeen.get(r.jobId), now);
+    if (days === null) continue;
+    enriched.push({
+      jobId: r.jobId,
+      daysOpen: days,
+      issue: r.issue,
+      priority: r.priority,
+      contact: r.contact,
+      jobDescription: r.jobDescription,
+    });
+  }
+  enriched.sort((a, b) => b.daysOpen - a.daysOpen);
+  return enriched.slice(0, limit);
+}
+
+// --- Workload imbalance ---------------------------------------------------
+
+export interface ImbalanceFinding {
+  high: { csrId: number; csrName: string; workload: number };
+  low: { csrId: number; csrName: string; workload: number };
+  ratio: number;
+}
+
+export function detectWorkloadImbalance(
+  metrics: CsrMetrics[],
+): ImbalanceFinding | null {
+  if (metrics.length < 2) return null;
+  const sorted = [...metrics].sort((a, b) => b.workload - a.workload);
+  const high = sorted[0];
+  const low = sorted[sorted.length - 1];
+  // Don't flag tiny workloads — noise.
+  if (high.workload < 10) return null;
+  const ratio = high.workload / Math.max(low.workload, 1);
+  // Don't flag mild differences.
+  if (ratio < 1.5) return null;
+  // Don't flag a tiny absolute gap (e.g., 12 vs 6 has ratio 2.0 but the
+  // difference of 6 jobs isn't worth a banner).
+  if (high.workload - low.workload < 8) return null;
+  return {
+    high: { csrId: high.csrId, csrName: high.csrName, workload: high.workload },
+    low: { csrId: low.csrId, csrName: low.csrName, workload: low.workload },
+    ratio,
+  };
+}
+
 export type { IssueKind };
