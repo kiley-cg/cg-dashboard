@@ -148,9 +148,20 @@ export function warehouseRank(
   return list.length;
 }
 
+// Per-line consolidation cap, analogous to CONSOLIDATION_MAX_RANK below.
+// Without this, pickPrimaryWarehouse will return Jacksonville over Reno
+// when Jacksonville has the only full-fill stock for a line — that's the
+// wrong tradeoff: vendor freight is free over $200 from SanMar/S&S/C&B,
+// so cutting one PO from a far DC just to consolidate isn't worth the
+// transit penalty. Cap at rank 2 (top 3 closest in the destination's
+// region — e.g. Seattle, Reno, Phoenix when shipping to a WEST decorator).
+// Beyond that, split closest-first via computeSplit.
+const PRIMARY_MAX_RANK = 2;
+
 /**
  * Pick the highest-priority warehouse that has full stock for the line.
- * Returns null when no single warehouse can fulfill alone.
+ * Returns null when no nearby warehouse can fulfill alone — falls through
+ * to computeSplit, which allocates closest-first.
  */
 export function pickPrimaryWarehouse(
   warehouses: WarehouseRef[],
@@ -161,6 +172,7 @@ export function pickPrimaryWarehouse(
   return (
     [...warehouses]
       .filter((w) => w.quantity >= qtyOrdered)
+      .filter((w) => warehouseRank(w, zip) <= PRIMARY_MAX_RANK)
       .sort((a, b) => {
         const pa = warehouseRank(a, zip);
         const pb = warehouseRank(b, zip);
