@@ -183,14 +183,19 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
     },
   );
 
+  // Capture the full response text and headers up front so the
+  // negotiated-rates diagnostic below has everything UPS support needs.
+  // Read .text() then JSON.parse so we can paste the raw body verbatim.
+  const responseText = await res.text();
+  const responseHeaders = Object.fromEntries(res.headers.entries());
+
   if (!res.ok) {
-    const txt = await res.text().catch(() => "");
     throw new Error(
-      `UPS Ratetimeintransit ${res.status}: ${txt || res.statusText}`,
+      `UPS Ratetimeintransit ${res.status}: ${responseText || res.statusText}`,
     );
   }
 
-  const data = (await res.json()) as UpsRateResponse;
+  const data = JSON.parse(responseText) as UpsRateResponse;
   const rated = pickGroundShipment(data.RateResponse?.RatedShipment);
   if (!rated) {
     const err = data.response?.errors?.[0];
@@ -214,21 +219,32 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
     Math.round((rawTotalCharge * factor + Number.EPSILON) * 100) / 100;
 
   // When we asked for negotiated rates (account number present + indicator
-  // sent) but UPS didn't return them, dump enough of the response to
-  // diagnose: most often this means the dev-portal app doesn't have
-  // negotiated rates enabled, or the account isn't on file with a
-  // contract. Surfaced so we don't have to guess from a "list rate" badge.
+  // sent) but UPS didn't return them, log the full request/response pair.
+  // UPS API support specifically asks for "header and body of the API
+  // request/response" to investigate account-tier issues — copy the
+  // fields below into a text/zip file and send to them. The Authorization
+  // header is redacted so you don't leak the OAuth bearer token.
   if (accountNumber && !negotiated) {
     console.warn("[ups] negotiated rates not returned despite account number", {
       accountNumber: `***${accountNumber.slice(-4)}`,
+      transId,
       fromZip: input.fromZip,
       toZip: input.toZip,
       requestSentNegotiatedIndicator: true,
       responseHadNegotiatedRateCharges: !!rated.NegotiatedRateCharges,
       responseTotalCharge: list?.MonetaryValue,
-      // First ~2KB of the rated-shipment JSON so we can see what UPS
-      // actually included (top-level keys are the diagnostic part).
-      ratedShipmentSnippet: JSON.stringify(rated).slice(0, 2000),
+      // Full exchange for UPS support — paste these verbatim.
+      requestUrl: `https://${host}/api/rating/v2409/Ratetimeintransit`,
+      requestHeaders: {
+        Authorization: "Bearer [REDACTED]",
+        "Content-Type": "application/json",
+        transId,
+        transactionSrc: "cg-inventory-check",
+      },
+      requestBody: JSON.stringify(body),
+      responseStatus: res.status,
+      responseHeaders,
+      responseBody: responseText.slice(0, 50_000),
     });
   }
 
