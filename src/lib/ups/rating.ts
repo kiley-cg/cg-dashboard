@@ -224,6 +224,19 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
   const responseHeaders = Object.fromEntries(res.headers.entries());
 
   if (!res.ok) {
+    // Log the outgoing request body so we can see exactly what UPS
+    // received when it rejected. Without this, a 4xx with a vague
+    // "missing X" error gives us no way to confirm whether our payload
+    // actually included X — particularly useful when chasing
+    // StateProvinceCode / ZIP3-derivation bugs.
+    console.error("[ups] rating request rejected", {
+      status: res.status,
+      transId,
+      fromZip: input.fromZip,
+      toZip: input.toZip,
+      requestBody: JSON.stringify(body),
+      responseBody: responseText.slice(0, 50_000),
+    });
     throw new Error(
       `UPS Ratetimeintransit ${res.status}: ${responseText || res.statusText}`,
     );
