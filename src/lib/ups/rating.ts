@@ -1,4 +1,5 @@
 import { getUpsToken, upsHost } from "./auth";
+import { zipToState } from "./zip-to-state";
 
 // UPS Rating + Time-In-Transit (combined endpoint).
 // Spec: POST /api/rating/v2409/Ratetimeintransit
@@ -95,6 +96,23 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
   const host = upsHost();
   const transId = `cg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
+  // UPS Rating requires StateProvinceCode on ship-from once the request
+  // is properly registered for negotiated-rate evaluation — without it
+  // we get error 9110016. Derive from ZIP3; if either side fails to
+  // resolve, fail fast rather than send a malformed request.
+  const fromState = zipToState(input.fromZip);
+  const toState = zipToState(input.toZip);
+  if (!fromState) {
+    throw new Error(
+      `UPS rating: could not derive state from fromZip="${input.fromZip}"`,
+    );
+  }
+  if (!toState) {
+    throw new Error(
+      `UPS rating: could not derive state from toZip="${input.toZip}"`,
+    );
+  }
+
   const dims = input.packageDimensionsInches ?? DEFAULT_DIMENSIONS_IN;
   const packageCount = splitIntoPackages(input.totalWeightLbs);
   const perPackageLbs = Math.max(
@@ -134,13 +152,25 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
       Shipment: {
         Shipper: {
           ShipperNumber: accountNumber ?? undefined,
-          Address: { PostalCode: input.fromZip, CountryCode: "US" },
+          Address: {
+            PostalCode: input.fromZip,
+            StateProvinceCode: fromState,
+            CountryCode: "US",
+          },
         },
         ShipFrom: {
-          Address: { PostalCode: input.fromZip, CountryCode: "US" },
+          Address: {
+            PostalCode: input.fromZip,
+            StateProvinceCode: fromState,
+            CountryCode: "US",
+          },
         },
         ShipTo: {
-          Address: { PostalCode: input.toZip, CountryCode: "US" },
+          Address: {
+            PostalCode: input.toZip,
+            StateProvinceCode: toState,
+            CountryCode: "US",
+          },
         },
         Service: { Code: "03", Description: "Ground" },
         // UPS tier 3 (Tristan, May 2026) confirmed: NegotiatedRatesIndicator
