@@ -1,9 +1,18 @@
 import * as soap from "soap";
 
-// SanMar's standard Product Info service. We use it specifically to pull
-// `pieceWeight` (lbs per piece) per (color, size) for accurate freight
-// calculations. Auth pattern matches the other Standard SanMar services
-// (customer number + username + password).
+// SanMar's standard Product Info service. Two distinct uses:
+//   1. `pieceWeight` per (color, size) for accurate freight calculations
+//   2. The catalog color name mapping: SanMar's PromoStandards Inventory
+//      service returns abbreviated/mainframe forms ("AnchorGyHt",
+//      "Shad Grey Twst", "BlkHthr"), while Syncore sales orders use full
+//      catalog names ("Anchor Grey Heather", "Shadow Grey Twist",
+//      "Black Heather"). Product Info exposes both: `catalogColor` is
+//      the abbreviated/mainframe form (matches Inventory's partColor)
+//      and `color` is the full catalog name (matches Syncore). We use
+//      this as a deterministic lookup so the matcher never has to guess.
+//
+// Auth pattern matches the other Standard SanMar services (customer
+// number + username + password).
 
 const DEFAULT_WSDL =
   "https://ws.sanmar.com:8080/SanMarWebService/SanMarProductInfoServicePort?wsdl";
@@ -23,8 +32,14 @@ async function getClient(): Promise<soap.Client> {
   return clientPromise;
 }
 
-export type SanMarPieceWeightRow = {
-  color: string | null;
+export type SanMarProductInfoRow = {
+  // Abbreviated/mainframe color (catalogColor) — matches the partColor
+  // returned by SanMar's PromoStandards Inventory service.
+  abbreviatedColor: string | null;
+  // Canonical full catalog color name (color) — matches what Syncore
+  // sales orders use. Substituted onto the inventory line so the matcher
+  // can do exact comparisons.
+  fullColor: string | null;
   size: string | null;
   pieceWeightLbs: number | null;
 };
@@ -49,9 +64,9 @@ function toLbs(v: unknown): number | null {
   return null;
 }
 
-export async function fetchSanMarPieceWeights(
+export async function fetchSanMarProductInfo(
   style: string,
-): Promise<SanMarPieceWeightRow[]> {
+): Promise<SanMarProductInfoRow[]> {
   const customerNumber = process.env.SANMAR_CUSTOMER_NUMBER?.trim();
   const userName = process.env.SANMAR_WS_ID?.trim();
   const password = process.env.SANMAR_WS_PASSWORD?.trim();
@@ -75,10 +90,11 @@ export async function fetchSanMarPieceWeights(
       ? [wrapped]
       : [];
 
-  return items.map((it) => {
+  return items.map((it): SanMarProductInfoRow => {
     const basic = it.productBasicInfo ?? {};
     return {
-      color: basic.catalogColor ?? basic.color ?? null,
+      abbreviatedColor: basic.catalogColor ?? null,
+      fullColor: basic.color ?? null,
       size: basic.size ?? null,
       pieceWeightLbs: toLbs(basic.pieceWeight),
     };

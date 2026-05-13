@@ -6,9 +6,14 @@ import { useRouter } from "next/navigation";
 type Props = {
   jobId: string;
   staleCount: number;
+  autoVerifyDisabled: boolean;
 };
 
-export function ClearVerificationsButton({ jobId, staleCount }: Props) {
+export function ClearVerificationsButton({
+  jobId,
+  staleCount,
+  autoVerifyDisabled,
+}: Props) {
   const router = useRouter();
   const [state, setState] = useState<
     | { kind: "idle" }
@@ -49,7 +54,7 @@ export function ClearVerificationsButton({ jobId, staleCount }: Props) {
         onClick={onClick}
         disabled={state.kind === "saving"}
         className="text-cg-n-500 text-[11px] underline hover:text-cg-red disabled:opacity-50"
-        title="Delete every verification record for this job. Use after a matcher fix when the stored verifications were captured against bad data."
+        title="Delete every verification record for this job and disable auto-verification — reps will manually verify each row from now on."
       >
         {state.kind === "saving"
           ? "Clearing…"
@@ -57,6 +62,14 @@ export function ClearVerificationsButton({ jobId, staleCount }: Props) {
             ? `Clear all verifications (${staleCount} stale)`
             : "Clear all verifications"}
       </button>
+      {autoVerifyDisabled && state.kind !== "saving" && (
+        <p
+          className="text-cg-n-500 text-[10px] italic"
+          title="This job has been cleared; rows will not auto-verify. Each row must be verified manually."
+        >
+          Auto-verify off — manual only
+        </p>
+      )}
       {state.kind === "error" && (
         <p className="text-cg-danger text-[10px]">{state.message}</p>
       )}

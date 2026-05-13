@@ -305,49 +305,76 @@ export function LineItemRow({
         )}
       </td>
       <td className="py-3 px-4 text-right tabular-nums align-top">
-        {inventoryLine ? (
-          <div className="flex flex-col items-end gap-0.5 text-xs">
-            {/*
-              SanMar's distributor pages surface three prices: Original
-              Price (regular wholesale), Sale Price (current promo, when
-              present), and Program Price (CG's contracted rate). The
-              raw piecePrice from the API is MSRP/retail and not shown
-              here — reps don't quote retail.
-            */}
-            {inventoryLine.casePrice != null && (
-              <div className="inline-flex items-baseline gap-2">
-                <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
-                  Original
-                </span>
-                <span className="text-cg-n-700">
-                  {formatMoney(inventoryLine.casePrice)}
-                </span>
+        {(() => {
+          if (!inventoryLine) {
+            return <span className="text-cg-n-400">—</span>;
+          }
+          // Three potential prices, in display order:
+          //   - Original Price (regular wholesale, casePrice from the API)
+          //   - Sale Price     (current promo, only when below original)
+          //   - Program Price  (CG's contracted rate, yourCost)
+          // Special case: when only one of these has a value, label it
+          // "Original Price" regardless of which field it came from —
+          // the category labels only make sense when there's something
+          // to compare against. Raw piecePrice (MSRP/retail) is not shown.
+          const orig = inventoryLine.casePrice;
+          const sale = inventoryLine.salePrice;
+          const prog = inventoryLine.yourCost;
+          const saleIsLower = sale != null && orig != null && sale < orig;
+          const visibleCount =
+            (orig != null ? 1 : 0) +
+            (saleIsLower ? 1 : 0) +
+            (prog != null ? 1 : 0);
+
+          if (visibleCount === 0) {
+            return <span className="text-cg-n-400">—</span>;
+          }
+          if (visibleCount === 1) {
+            const value = (orig ?? (saleIsLower ? sale : null) ?? prog) as number;
+            return (
+              <div className="flex flex-col items-end gap-0.5 text-xs">
+                <div className="inline-flex items-baseline gap-2">
+                  <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
+                    Original Price
+                  </span>
+                  <span className="text-cg-n-900 font-semibold">
+                    {formatMoney(value)}
+                  </span>
+                </div>
               </div>
-            )}
-            {inventoryLine.salePrice != null &&
-              inventoryLine.casePrice != null &&
-              inventoryLine.salePrice < inventoryLine.casePrice && (
+            );
+          }
+          return (
+            <div className="flex flex-col items-end gap-0.5 text-xs">
+              {orig != null && (
+                <div className="inline-flex items-baseline gap-2">
+                  <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
+                    Original Price
+                  </span>
+                  <span className="text-cg-n-700">{formatMoney(orig)}</span>
+                </div>
+              )}
+              {saleIsLower && sale != null && (
                 <div className="inline-flex items-baseline gap-2">
                   <span className="text-cg-success uppercase tracking-wider text-[9px]">
-                    Sale
+                    Sale Price
                   </span>
-                  <span className="text-cg-success">
-                    {formatMoney(inventoryLine.salePrice)}
+                  <span className="text-cg-success">{formatMoney(sale)}</span>
+                </div>
+              )}
+              {prog != null && (
+                <div className="inline-flex items-baseline gap-2">
+                  <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
+                    Program Price
+                  </span>
+                  <span className="text-cg-n-900 font-semibold">
+                    {formatMoney(prog)}
                   </span>
                 </div>
               )}
-            <div className="inline-flex items-baseline gap-2">
-              <span className="text-cg-n-500 uppercase tracking-wider text-[9px]">
-                Program
-              </span>
-              <span className="text-cg-n-900 font-semibold">
-                {formatMoney(inventoryLine.yourCost)}
-              </span>
             </div>
-          </div>
-        ) : (
-          <span className="text-cg-n-400">—</span>
-        )}
+          );
+        })()}
       </td>
       <td className="py-3 px-4 text-right align-top">
         {state.kind === "ok" ? (

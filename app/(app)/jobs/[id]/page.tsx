@@ -7,6 +7,7 @@ import type { FlatLineItem } from "@/lib/syncore/types";
 import {
   autoVerifyClean,
   findVerificationsForJob,
+  isJobAutoVerifyDisabled,
 } from "@/lib/db/verifications";
 import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit } from "@/lib/vendors/warehouse-priority";
 import { matchVariant } from "@/lib/vendors/match";
@@ -102,8 +103,11 @@ export default async function JobPage({ params, searchParams }: Props) {
 
   // Hybrid: auto-verify rows where SanMar can fully fill the order; require
   // explicit click for partial fills, zero stock, or vendor errors.
+  // autoVerifyClean is a no-op when the job has been "Cleared" — see
+  // job_verification_clears in the schema.
   let verifications: Awaited<ReturnType<typeof findVerificationsForJob>> =
     new Map();
+  const autoVerifyDisabled = await isJobAutoVerifyDisabled(id);
   if (userId) {
     const existing = await findVerificationsForJob(id);
     verifications = await autoVerifyClean({
@@ -253,10 +257,11 @@ export default async function JobPage({ params, searchParams }: Props) {
                   </span>
                   <span className="text-cg-n-500">({decorator.zip})</span>
                 </div>
-                {verifications.size > 0 && (
+                {(verifications.size > 0 || autoVerifyDisabled) && (
                   <ClearVerificationsButton
                     jobId={id}
                     staleCount={staleVerificationCount}
+                    autoVerifyDisabled={autoVerifyDisabled}
                   />
                 )}
               </div>
@@ -315,11 +320,14 @@ export default async function JobPage({ params, searchParams }: Props) {
         )}
 
         {await Promise.all(enriched.map(async ({ salesOrder: so, rows }) => {
-          // Ship-to: use the Sales Order's destination zip when present so
-          // drop-ship orders rank warehouses from the customer's location.
-          // Falls back to CG's home zip (98512) inside warehouse-priority.
-          const shipToZip =
-            (so.ship_to as { zip?: string } | undefined)?.zip ?? null;
+          // Warehouse priority and per-SO freight are both about the
+          // vendor → decorator leg (vendors ship blanks to the decorator,
+          // not directly to the end customer), so rank against the
+          // decorator's zip — Frontier 97002, OSI 97232 — not the sales
+          // order's customer ship-to. For BB18007 with a SE customer,
+          // this is the difference between picking Jacksonville (closest
+          // to customer) and Phoenix (closest to Frontier in OR).
+          const shipToZip = decorator.zip;
 
           // Multi-line consolidation: if a single warehouse can fulfill
           // every line on this Sales Order, use it as Ships-from for every

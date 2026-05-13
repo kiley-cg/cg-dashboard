@@ -31,14 +31,23 @@ function camelTokens(raw: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
-// Two tokens "match" when they're equal or one is a 4+ char prefix of
-// the other. The 4-char floor blocks accidents like "red" matching
-// "reddish"; SanMar's typical abbreviation ("Heri" for "Heritage")
-// satisfies it.
+// Two tokens "match" when they're equal, when one is a 4+ char prefix
+// of the other, or when their consonant skeletons match. SanMar uses
+// two abbreviation patterns interchangeably:
+//   - prefix truncation: "Heritage" → "Heri", "Shadow" → "Shad"
+//   - interior vowel deletion: "Twist" → "Twst", "Heather" → "Hthr"
+// The 4-char floor on prefix and the 4-consonant floor on skeleton
+// equality both guard against short-token collisions like red↔road.
+function consonantSkeleton(s: string): string {
+  return s.replace(/[aeiou]/g, "");
+}
 function tokenMatch(a: string, b: string): boolean {
   if (a === b) return true;
   const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
-  return shorter.length >= 4 && longer.startsWith(shorter);
+  if (shorter.length >= 4 && longer.startsWith(shorter)) return true;
+  const sa = consonantSkeleton(a);
+  const sb = consonantSkeleton(b);
+  return sa.length >= 4 && sb.length >= 4 && sa === sb;
 }
 
 const SIZE_SYNONYMS: ReadonlyArray<readonly string[]> = [
