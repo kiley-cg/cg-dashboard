@@ -143,12 +143,16 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
           Address: { PostalCode: input.toZip, CountryCode: "US" },
         },
         Service: { Code: "03", Description: "Ground" },
-        // Without this, UPS silently returns list rates even when
-        // ShipperNumber matches a contracted account. NegotiatedRatesIndicator
-        // is an empty element (presence is the flag); only meaningful when
+        // UPS tier 3 (Tristan, May 2026) confirmed: NegotiatedRatesIndicator
+        // lives inside ShipmentRatingOptions, NOT RateInformation. The
+        // earlier shape (RateInformation.NegotiatedRatesIndicator) was
+        // accepted without error but silently ignored, so the API returned
+        // list rates with Alert 110971 instead of the contracted rate. The
+        // value is documented as a string with presence-as-flag semantics
+        // (≤1, empty string is the canonical form). Only meaningful when
         // a ShipperNumber is supplied.
         ...(accountNumber
-          ? { RateInformation: { NegotiatedRatesIndicator: {} } }
+          ? { ShipmentRatingOptions: { NegotiatedRatesIndicator: "" } }
           : {}),
         // /Ratetimeintransit accepts a single Package or Package array.
         // Use array form so multi-package quotes go through cleanly.
