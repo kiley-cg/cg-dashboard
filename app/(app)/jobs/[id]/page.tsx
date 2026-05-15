@@ -23,13 +23,23 @@ type Props = {
     decorator?: string;
     costs?: string;
     freight?: string;
+    fromZip?: string;
+    toZip?: string;
   }>;
 };
 
-const CG_HOME_ZIP = "98512";
-
 function flagOn(v: string | undefined): boolean {
   return v === "1" || v === "true";
+}
+
+// Permissive: trim, keep digits/letters only. Returns null when the input
+// can't plausibly be a US ZIP, so the caller can fall through to the
+// "needs input" branch instead of firing a guaranteed-to-fail UPS call.
+function cleanZip(v: string | undefined): string | null {
+  if (!v) return null;
+  const trimmed = v.trim();
+  if (trimmed.length < 3) return null;
+  return trimmed;
 }
 
 export default async function JobPage({ params, searchParams }: Props) {
@@ -41,6 +51,13 @@ export default async function JobPage({ params, searchParams }: Props) {
   // implies weights=1 even when costs=0.
   const includeFreight = flagOn(sp.freight);
   const includeWeights = includeFreight;
+  const freightFromZip = cleanZip(sp.fromZip);
+  const freightToZip = cleanZip(sp.toZip);
+  // Decorator-leg quote only fires when the rep has explicitly entered
+  // both ZIPs — no implicit "default to CG home" or "default to decorator
+  // zip" fallback, since those silently steered every quote at the same
+  // pair regardless of the actual job's destination.
+  const canQuoteFreight = !!(freightFromZip && freightToZip);
   const session = await auth();
   const userId = session?.user?.id;
 
@@ -143,38 +160,42 @@ export default async function JobPage({ params, searchParams }: Props) {
     }
   }
 
-  // Decorator → CG return-leg freight estimate. Vendors ship blanks to
-  // the decorator free over $200, but the decorator → CG (98512) leg is
-  // on CG's UPS account. That's the only freight CG actually pays, and
-  // it's what this number quotes. The per-SO vendor-warehouse → ship-to
-  // numbers below are informational (vendor's approximate cost).
-  // Gated on ?freight=1 so availability-only checks skip the UPS call.
-  const decoratorFreight = !includeFreight ? null : await (async () => {
-    const allLines: { qtyOrdered: number; pieceWeightLbs: number | null }[] =
-      [];
-    for (const { rows } of enriched) {
-      for (const { line, lookup } of rows) {
-        if (lookup.status !== "ok") continue;
-        const matched = matchVariant(lookup, line.color, line.size);
-        if (!matched) continue;
-        allLines.push({
-          qtyOrdered: line.qtyOrdered,
-          pieceWeightLbs: matched.pieceWeightLbs ?? null,
-        });
-      }
-    }
-    if (allLines.length === 0) return null;
-    return estimateFreight({
-      toZip: CG_HOME_ZIP,
-      shipments: [
-        {
-          fromWarehouse: { id: `decorator-${decorator.id}`, name: decorator.name },
-          fromZip: decorator.zip,
-          lines: allLines,
-        },
-      ],
-    });
-  })();
+  // User-entered ship-from → ship-to freight estimate. This is the only
+  // freight CG actually pays (vendor → decorator is free over $200), and
+  // it's quoted from the actual line items on the sales orders so the
+  // total reflects real styles/sizes/quantities. ZIPs come from the form
+  // below; no implicit defaults.
+  const decoratorFreight =
+    !includeFreight || !freightFromZip || !freightToZip
+      ? null
+      : await (async () => {
+          const allLines: {
+            qtyOrdered: number;
+            pieceWeightLbs: number | null;
+          }[] = [];
+          for (const { rows } of enriched) {
+            for (const { line, lookup } of rows) {
+              if (lookup.status !== "ok") continue;
+              const matched = matchVariant(lookup, line.color, line.size);
+              if (!matched) continue;
+              allLines.push({
+                qtyOrdered: line.qtyOrdered,
+                pieceWeightLbs: matched.pieceWeightLbs ?? null,
+              });
+            }
+          }
+          if (allLines.length === 0) return null;
+          return estimateFreight({
+            toZip: freightToZip,
+            shipments: [
+              {
+                fromWarehouse: { id: "user-entered", name: "Ship from" },
+                fromZip: freightFromZip,
+                lines: allLines,
+              },
+            ],
+          });
+        })();
 
   return (
     <section className="max-w-6xl mx-auto px-6 py-10">
@@ -216,6 +237,10 @@ export default async function JobPage({ params, searchParams }: Props) {
           if (c) next.set("costs", "1");
           if (f) next.set("freight", "1");
           if (d !== DEFAULT_DECORATOR_ID) next.set("decorator", d);
+          // Preserve the freight ZIPs across toggle clicks so the quote
+          // doesn't disappear when the rep flips costs on/off.
+          if (freightFromZip) next.set("fromZip", freightFromZip);
+          if (freightToZip) next.set("toZip", freightToZip);
           const qs = next.toString();
           return `/jobs/${id}${qs ? `?${qs}` : ""}`;
         };
@@ -266,48 +291,104 @@ export default async function JobPage({ params, searchParams }: Props) {
                 )}
               </div>
             </div>
-        {decoratorFreight?.status === "ok" ? (() => {
-          const s = decoratorFreight.shipments[0];
-          return (
-            <>
-              <p className="text-2xl font-bold mt-1 tabular-nums">
-                {decoratorFreight.totalCharge.toLocaleString("en-US", {
-                  style: "currency",
-                  currency: decoratorFreight.currency,
-                })}
+            {includeFreight && (
+              // Plain GET form: the browser submits with fromZip/toZip as
+              // URL params, the page re-renders server-side with the quote.
+              // Hidden inputs carry the other params so we don't lose them.
+              <form
+                method="get"
+                action={`/jobs/${id}`}
+                className="mt-3 flex flex-wrap items-end gap-3 text-xs"
+              >
+                <input type="hidden" name="freight" value="1" />
+                {includeCosts && <input type="hidden" name="costs" value="1" />}
+                {decorator.id !== DEFAULT_DECORATOR_ID && (
+                  <input type="hidden" name="decorator" value={decorator.id} />
+                )}
+                <label className="flex flex-col gap-1">
+                  <span className="text-cg-n-500 uppercase tracking-wider font-semibold">
+                    Ship from
+                  </span>
+                  <input
+                    type="text"
+                    name="fromZip"
+                    defaultValue={freightFromZip ?? ""}
+                    placeholder="ZIP"
+                    inputMode="numeric"
+                    maxLength={10}
+                    className="w-28 border border-cg-n-300 rounded px-2 py-1 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-cg-red"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-cg-n-500 uppercase tracking-wider font-semibold">
+                    Ship to
+                  </span>
+                  <input
+                    type="text"
+                    name="toZip"
+                    defaultValue={freightToZip ?? ""}
+                    placeholder="ZIP"
+                    inputMode="numeric"
+                    maxLength={10}
+                    className="w-28 border border-cg-n-300 rounded px-2 py-1 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-cg-red"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="bg-cg-red text-white text-xs font-semibold px-3 py-1.5 rounded hover:opacity-90"
+                >
+                  Quote freight
+                </button>
+              </form>
+            )}
+            {!includeFreight ? (
+              <p className="text-cg-n-400 text-xs mt-3">
+                Freight off. Toggle on above to quote a shipment.
               </p>
-              <p className="text-cg-n-500 text-xs mt-1">
-                {decorator.name} ({decorator.zip}) → CG ({CG_HOME_ZIP}):{" "}
-                {s.weight.totalQty.toLocaleString()} pcs ·{" "}
-                {s.weight.totalWeightLbs} lbs · {s.estimate.packages} pkg
-                {s.estimate.transitDays != null
-                  ? ` · ~${s.estimate.transitDays}-day transit`
-                  : ""}
-                {s.estimate.isNegotiated
-                  ? " · negotiated rate"
-                  : ` · list rate × ${s.estimate.calibrationFactor.toFixed(2)} calibration (raw $${s.estimate.rawTotalCharge.toFixed(2)})`}
-                . Vendor → decorator leg is free over $200; this is the only
-                freight CG pays.
+            ) : !canQuoteFreight ? (
+              <p className="text-cg-n-400 text-xs mt-3">
+                Enter ship-from and ship-to ZIPs to quote freight for this
+                job&rsquo;s line items.
               </p>
-            </>
-          );
-        })() : decoratorFreight?.status === "skipped" ? (
-          <p className="text-cg-n-400 text-xs mt-1">
-            Freight estimate: {decoratorFreight.reason}
-          </p>
-        ) : decoratorFreight?.status === "error" ? (
-          <p className="text-cg-danger text-xs mt-1" title={decoratorFreight.message}>
-            Freight estimate failed (hover for details)
-          </p>
-        ) : !includeFreight ? (
-          <p className="text-cg-n-400 text-xs mt-1">
-            Freight off. Toggle on above to quote decorator → CG.
-          </p>
-        ) : (
-          <p className="text-cg-n-400 text-xs mt-1">
-            No quotable lines yet.
-          </p>
-        )}
+            ) : decoratorFreight?.status === "ok" ? (() => {
+              const s = decoratorFreight.shipments[0];
+              return (
+                <div className="mt-3">
+                  <p className="text-2xl font-bold tabular-nums">
+                    {decoratorFreight.totalCharge.toLocaleString("en-US", {
+                      style: "currency",
+                      currency: decoratorFreight.currency,
+                    })}
+                  </p>
+                  <p className="text-cg-n-500 text-xs mt-1">
+                    {freightFromZip} → {freightToZip}:{" "}
+                    {s.weight.totalQty.toLocaleString()} pcs ·{" "}
+                    {s.weight.totalWeightLbs} lbs · {s.estimate.packages} pkg
+                    {s.estimate.transitDays != null
+                      ? ` · ~${s.estimate.transitDays}-day transit`
+                      : ""}
+                    {s.estimate.isNegotiated
+                      ? " · negotiated rate"
+                      : ` · list rate × ${s.estimate.calibrationFactor.toFixed(2)} calibration (raw $${s.estimate.rawTotalCharge.toFixed(2)})`}
+                    {s.weight.skippedLines > 0
+                      ? ` · ${s.weight.skippedLines} line${s.weight.skippedLines === 1 ? "" : "s"} (${s.weight.skippedQty} pcs) skipped — no vendor weight`
+                      : ""}
+                  </p>
+                </div>
+              );
+            })() : decoratorFreight?.status === "skipped" ? (
+              <p className="text-cg-n-400 text-xs mt-3">
+                Freight estimate: {decoratorFreight.reason}
+              </p>
+            ) : decoratorFreight?.status === "error" ? (
+              <p className="text-cg-danger text-xs mt-3" title={decoratorFreight.message}>
+                Freight estimate failed (hover for details)
+              </p>
+            ) : (
+              <p className="text-cg-n-400 text-xs mt-3">
+                No quotable lines yet.
+              </p>
+            )}
           </div>
         );
       })()}

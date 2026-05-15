@@ -1,8 +1,6 @@
 import { getUpsGroundRate, type RateEstimate } from "./rating";
 import { warehouseZip } from "./warehouse-zips";
 
-const DEFAULT_PIECE_WEIGHT_LBS = 0.5;
-
 export type FreightLineInput = {
   qtyOrdered: number;
   pieceWeightLbs: number | null;
@@ -18,7 +16,7 @@ export type FreightShipmentInput = {
 };
 
 export type FreightEstimateInput = {
-  toZip: string | null;
+  toZip: string;
   shipments: FreightShipmentInput[];
 };
 
@@ -26,8 +24,13 @@ export type WeightBreakdown = {
   totalQty: number;
   totalWeightLbs: number;
   avgPieceWeightLbs: number;
+  // Lines included in the quote (had a real vendor piece weight).
   linesWithRealWeight: number;
   totalLines: number;
+  // Lines dropped because the vendor didn't return a piece weight.
+  // Surfaced in the UI so reps know the quote is partial.
+  skippedLines: number;
+  skippedQty: number;
 };
 
 export type FreightShipmentResult = {
@@ -52,18 +55,22 @@ export type FreightEstimateResult =
   | { status: "skipped"; reason: string }
   | { status: "error"; message: string };
 
-const HOME_ZIP = "98512";
-
 function computeWeight(lines: FreightLineInput[]): WeightBreakdown {
   let totalQty = 0;
   let totalWeight = 0;
   let realWeightLines = 0;
+  let skippedQty = 0;
+  let skippedLines = 0;
   for (const l of lines) {
     if (l.qtyOrdered <= 0) continue;
+    if (l.pieceWeightLbs == null) {
+      skippedQty += l.qtyOrdered;
+      skippedLines += 1;
+      continue;
+    }
     totalQty += l.qtyOrdered;
-    const perPiece = l.pieceWeightLbs ?? DEFAULT_PIECE_WEIGHT_LBS;
-    if (l.pieceWeightLbs != null) realWeightLines += 1;
-    totalWeight += l.qtyOrdered * perPiece;
+    totalWeight += l.qtyOrdered * l.pieceWeightLbs;
+    realWeightLines += 1;
   }
   const totalWeightLbs = Math.max(1, Math.ceil(totalWeight));
   const avgPieceWeightLbs = totalQty > 0 ? totalWeight / totalQty : 0;
@@ -72,7 +79,9 @@ function computeWeight(lines: FreightLineInput[]): WeightBreakdown {
     totalWeightLbs,
     avgPieceWeightLbs,
     linesWithRealWeight: realWeightLines,
-    totalLines: lines.filter((l) => l.qtyOrdered > 0).length,
+    totalLines: realWeightLines + skippedLines,
+    skippedLines,
+    skippedQty,
   };
 }
 
@@ -85,7 +94,7 @@ export async function estimateFreight(
   if (input.shipments.length === 0) {
     return { status: "skipped", reason: "No shipments to quote" };
   }
-  const toZip = (input.toZip ?? HOME_ZIP).trim();
+  const toZip = input.toZip.trim();
   if (!toZip) {
     return { status: "skipped", reason: "No destination zip" };
   }
