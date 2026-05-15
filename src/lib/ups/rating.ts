@@ -224,13 +224,8 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
   const responseHeaders = Object.fromEntries(res.headers.entries());
 
   if (!res.ok) {
-    // Include the outgoing request body in the throw so we can see what
-    // UPS actually received. The standalone console.error variant of
-    // this didn't surface in Vercel logs (likely log dedup); piggy-
-    // backing on the existing `[ups] freight estimate failed` path
-    // guarantees the data shows up next to the error.
     throw new Error(
-      `UPS Ratetimeintransit ${res.status}: ${responseText || res.statusText} | request=${JSON.stringify(body)}`,
+      `UPS Ratetimeintransit ${res.status}: ${responseText || res.statusText}`,
     );
   }
 
