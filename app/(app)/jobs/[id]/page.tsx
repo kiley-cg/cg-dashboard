@@ -352,14 +352,38 @@ export default async function JobPage({ params, searchParams }: Props) {
               </p>
             ) : decoratorFreight?.status === "ok" ? (() => {
               const s = decoratorFreight.shipments[0];
+              const fmt = (n: number) =>
+                n.toLocaleString("en-US", {
+                  style: "currency",
+                  currency: decoratorFreight.currency,
+                });
+              const hasNegotiated = s.estimate.negotiatedTotalCharge != null;
               return (
                 <div className="mt-3">
-                  <p className="text-2xl font-bold tabular-nums">
-                    {decoratorFreight.totalCharge.toLocaleString("en-US", {
-                      style: "currency",
-                      currency: decoratorFreight.currency,
-                    })}
-                  </p>
+                  {hasNegotiated ? (
+                    <div className="flex items-baseline gap-4 flex-wrap">
+                      <div>
+                        <p className="text-cg-n-500 text-[10px] uppercase tracking-wider font-semibold">
+                          Negotiated
+                        </p>
+                        <p className="text-2xl font-bold tabular-nums text-cg-n-900">
+                          {fmt(s.estimate.negotiatedTotalCharge as number)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-cg-n-500 text-[10px] uppercase tracking-wider font-semibold">
+                          List
+                        </p>
+                        <p className="text-base font-semibold tabular-nums text-cg-n-500 line-through decoration-cg-n-400">
+                          {fmt(s.estimate.listTotalCharge)}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-2xl font-bold tabular-nums">
+                      {fmt(decoratorFreight.totalCharge)}
+                    </p>
+                  )}
                   <p className="text-cg-n-500 text-xs mt-1">
                     {freightFromZip} → {freightToZip}:{" "}
                     {s.weight.totalQty.toLocaleString()} pcs ·{" "}
@@ -367,9 +391,9 @@ export default async function JobPage({ params, searchParams }: Props) {
                     {s.estimate.transitDays != null
                       ? ` · ~${s.estimate.transitDays}-day transit`
                       : ""}
-                    {s.estimate.isNegotiated
-                      ? " · negotiated rate"
-                      : ` · list rate × ${s.estimate.calibrationFactor.toFixed(2)} calibration (raw $${s.estimate.rawTotalCharge.toFixed(2)})`}
+                    {hasNegotiated
+                      ? ` · negotiated rate (list ${fmt(s.estimate.listTotalCharge)})`
+                      : ` · list rate × ${s.estimate.calibrationFactor.toFixed(2)} calibration (raw ${fmt(s.estimate.listTotalCharge)})`}
                     {s.weight.skippedLines > 0
                       ? ` · ${s.weight.skippedLines} line${s.weight.skippedLines === 1 ? "" : "s"} (${s.weight.skippedQty} pcs) skipped — no vendor weight`
                       : ""}
@@ -566,17 +590,40 @@ export default async function JobPage({ params, searchParams }: Props) {
                     (n, s) => n + s.weight.totalLines,
                     0,
                   );
+                  const listTotal = freight.shipments.reduce(
+                    (n, s) => n + s.estimate.listTotalCharge,
+                    0,
+                  );
+                  const negotiatedTotal = freight.shipments.every(
+                    (s) => s.estimate.negotiatedTotalCharge != null,
+                  )
+                    ? freight.shipments.reduce(
+                        (n, s) =>
+                          n + (s.estimate.negotiatedTotalCharge as number),
+                        0,
+                      )
+                    : null;
+                  const fmt = (n: number) =>
+                    n.toLocaleString("en-US", {
+                      style: "currency",
+                      currency: freight.currency,
+                    });
                   const tooltipLines: string[] = [
-                    `UPS Ground · ${freight.shipments.length} shipment${freight.shipments.length === 1 ? "" : "s"} · ${freight.shipments[0].estimate.isNegotiated ? "negotiated rate" : "list rate"}`,
+                    `UPS Ground · ${freight.shipments.length} shipment${freight.shipments.length === 1 ? "" : "s"} · ${negotiatedTotal != null ? "negotiated rate" : "list rate × calibration"}`,
                     `Destination zip: ${shipToZip ?? "98512"}`,
                     `Quantity: ${totalQty.toLocaleString()} pieces across ${totalLines} line${totalLines === 1 ? "" : "s"}`,
                     `Real vendor weights: ${realWeightLines} of ${totalLines} line${totalLines === 1 ? "" : "s"}`,
                     `Total weight: ${totalWeight} lbs across ${totalPackages} package${totalPackages === 1 ? "" : "s"} (≤70 lb each, 24×16×16 in default dims)`,
                     "",
+                    `List rate total: ${fmt(listTotal)}`,
+                    negotiatedTotal != null
+                      ? `Negotiated total: ${fmt(negotiatedTotal)}`
+                      : `Negotiated rate: not returned by UPS (showing list × ${freight.shipments[0].estimate.calibrationFactor.toFixed(2)} calibration)`,
+                    "",
                   ];
                   for (const s of freight.shipments) {
                     tooltipLines.push(
-                      `• ${s.warehouseName} (${s.fromZip}): ${s.weight.totalQty.toLocaleString()} pcs · ${s.weight.totalWeightLbs} lbs · ${s.estimate.packages} pkg · ${s.estimate.transitDays != null ? `~${s.estimate.transitDays}d` : "transit ?"} · ${s.estimate.totalCharge.toLocaleString("en-US", { style: "currency", currency: s.estimate.currency })}`,
+                      `• ${s.warehouseName} (${s.fromZip}): ${s.weight.totalQty.toLocaleString()} pcs · ${s.weight.totalWeightLbs} lbs · ${s.estimate.packages} pkg · ${s.estimate.transitDays != null ? `~${s.estimate.transitDays}d` : "transit ?"} · list ${fmt(s.estimate.listTotalCharge)}${s.estimate.negotiatedTotalCharge != null ? ` · negotiated ${fmt(s.estimate.negotiatedTotalCharge)}` : ""}`,
                     );
                   }
                   if (freight.skipped.length > 0) {
@@ -595,12 +642,20 @@ export default async function JobPage({ params, searchParams }: Props) {
                       title={tooltipLines.join("\n")}
                     >
                       Estimated freight:{" "}
-                      <span className="font-semibold">
-                        {freight.totalCharge.toLocaleString("en-US", {
-                          style: "currency",
-                          currency: freight.currency,
-                        })}
-                      </span>{" "}
+                      {negotiatedTotal != null ? (
+                        <>
+                          <span className="font-semibold">
+                            {fmt(negotiatedTotal)}
+                          </span>{" "}
+                          <span className="text-cg-n-500">
+                            (list {fmt(listTotal)})
+                          </span>
+                        </>
+                      ) : (
+                        <span className="font-semibold">
+                          {fmt(freight.totalCharge)}
+                        </span>
+                      )}{" "}
                       Ground
                       {freight.maxTransitDays != null
                         ? ` · ~${freight.maxTransitDays}-day transit`
