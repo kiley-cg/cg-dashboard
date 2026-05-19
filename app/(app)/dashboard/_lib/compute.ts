@@ -405,6 +405,221 @@ export interface ImbalanceFinding {
   ratio: number;
 }
 
+// --- Team metrics & benchmarks --------------------------------------------
+//
+// Sums + averages across the team for the top-of-page TeamSummary strip and
+// the per-card benchmark markers on each scorecard. Pure reduction over the
+// metrics array — no new queries.
+
+export interface TeamMetrics {
+  csrCount: number;
+  // Totals
+  totalWorkload: number;
+  totalOverdue: number;
+  totalCriticalRush: number;
+  totalStaleCriticalRush: number;
+  totalDueToday: number;
+  totalClosedToday: number;
+  // Averages (per CSR)
+  avgWorkload: number;
+  avgOverdue: number;
+  avgCriticalRush: number;
+  avgStaleCriticalRush: number;
+  avgDueToday: number;
+  // Workload imbalance bookkeeping
+  overWorkloadThreshold: number;
+  workloadThreshold: number;
+  // Per-CSR rank on the headline attention score (lower is better → rank 1).
+  ranks: Map<number, number>;
+}
+
+const HEAVY_WORKLOAD_THRESHOLD = 30;
+
+function mean(values: number[]): number {
+  if (values.length === 0) return 0;
+  return values.reduce((s, v) => s + v, 0) / values.length;
+}
+
+export function deriveTeamMetrics(metrics: CsrMetrics[]): TeamMetrics {
+  const csrCount = metrics.length;
+
+  const totalWorkload = metrics.reduce((s, m) => s + m.workload, 0);
+  const totalOverdue = metrics.reduce((s, m) => s + m.overdue, 0);
+  const totalCriticalRush = metrics.reduce((s, m) => s + m.criticalRush, 0);
+  const totalStaleCriticalRush = metrics.reduce(
+    (s, m) => s + m.staleCriticalRush,
+    0,
+  );
+  const totalDueToday = metrics.reduce((s, m) => s + m.dueToday, 0);
+  const totalClosedToday = metrics.reduce((s, m) => s + m.closedToday, 0);
+
+  const overWorkloadThreshold = metrics.filter(
+    (m) => m.workload > HEAVY_WORKLOAD_THRESHOLD,
+  ).length;
+
+  // Rank by headlineKpi ascending (lower-better = rank 1). Ties get the same
+  // rank using the "min" method so two CSRs at 0 are both rank 1.
+  const sortedByKpi = [...metrics].sort(
+    (a, b) => a.headlineKpi - b.headlineKpi,
+  );
+  const ranks = new Map<number, number>();
+  let lastValue = -1;
+  let lastRank = 0;
+  sortedByKpi.forEach((m, i) => {
+    const rank = m.headlineKpi === lastValue ? lastRank : i + 1;
+    ranks.set(m.csrId, rank);
+    lastValue = m.headlineKpi;
+    lastRank = rank;
+  });
+
+  return {
+    csrCount,
+    totalWorkload,
+    totalOverdue,
+    totalCriticalRush,
+    totalStaleCriticalRush,
+    totalDueToday,
+    totalClosedToday,
+    avgWorkload: mean(metrics.map((m) => m.workload)),
+    avgOverdue: mean(metrics.map((m) => m.overdue)),
+    avgCriticalRush: mean(metrics.map((m) => m.criticalRush)),
+    avgStaleCriticalRush: mean(metrics.map((m) => m.staleCriticalRush)),
+    avgDueToday: mean(metrics.map((m) => m.dueToday)),
+    overWorkloadThreshold,
+    workloadThreshold: HEAVY_WORKLOAD_THRESHOLD,
+    ranks,
+  };
+}
+
+// "Is this CSR's metric meaningfully above or below team average?" Used by the
+// scorecard to color the benchmark subtitle. Higher is worse for these
+// metrics, so above-avg → bad.
+export type BenchmarkTone = "good" | "neutral" | "bad";
+
+export function benchmarkTone(
+  value: number,
+  avg: number,
+  opts: { higherIsWorse?: boolean } = {},
+): BenchmarkTone {
+  const higherIsWorse = opts.higherIsWorse ?? true;
+  if (avg < 1) {
+    // When the team average is tiny, raw deltas dominate. Avoid false reds.
+    if (value === 0) return "good";
+    if (higherIsWorse) return value >= 2 ? "bad" : "neutral";
+    return value >= 2 ? "good" : "neutral";
+  }
+  const ratio = value / avg;
+  if (higherIsWorse) {
+    if (ratio >= 1.5) return "bad";
+    if (ratio <= 0.5) return "good";
+    return "neutral";
+  }
+  if (ratio >= 1.5) return "good";
+  if (ratio <= 0.5) return "bad";
+  return "neutral";
+}
+
+// --- Priority queue -------------------------------------------------------
+//
+// One ranked list across the whole team of the top items that need attention
+// right now. Each row gets a single "reason" tag based on the highest-scoring
+// rule it matches.
+
+export type PriorityReason =
+  | "stale-critical"
+  | "long-stuck"
+  | "overdue-aged"
+  | "critical"
+  | "overdue";
+
+export interface PriorityItem {
+  jobId: number;
+  csrId: number;
+  csrName: string;
+  issue: string | null;
+  priority: string | null;
+  contact: string | null;
+  jobDescription: string | null;
+  daysOpen: number;
+  daysOverdue: number;
+  reason: PriorityReason;
+  score: number;
+}
+
+export const PRIORITY_REASON_LABEL: Record<PriorityReason, string> = {
+  "stale-critical": "Stale Critical/Rush",
+  "long-stuck": "Long-stuck (14d+)",
+  "overdue-aged": "Overdue & aged",
+  critical: "Critical/Rush",
+  overdue: "Overdue",
+};
+
+export function buildPriorityQueue(args: {
+  metrics: CsrMetrics[];
+  jobFirstSeen: Map<number, Date>;
+  todayPacific?: string;
+  now?: Date;
+  limit?: number;
+}): PriorityItem[] {
+  const today = args.todayPacific ?? todayInPacific();
+  const now = args.now ?? new Date();
+  const limit = args.limit ?? 15;
+
+  const items: PriorityItem[] = [];
+  for (const m of args.metrics) {
+    for (const r of m.openRows) {
+      const overdue = daysOverdue(r.fuDate, today) ?? 0;
+      const stale =
+        jobStaleDays({
+          jobId: r.jobId,
+          fuDate: r.fuDate,
+          jobFirstSeen: args.jobFirstSeen,
+          todayPacific: today,
+          now,
+        }) ?? 0;
+      const critical = isCritical(r.priority);
+
+      let reason: PriorityReason | null = null;
+      let score = 0;
+      if (critical && overdue > 0) {
+        reason = "stale-critical";
+        score = 1000 + stale * 5 + overdue * 3;
+      } else if (stale >= 14) {
+        reason = "long-stuck";
+        score = 500 + stale * 4;
+      } else if (overdue > 0 && stale >= 7) {
+        reason = "overdue-aged";
+        score = 300 + stale * 3 + overdue * 2;
+      } else if (critical) {
+        reason = "critical";
+        score = 200 + stale;
+      } else if (overdue > 0) {
+        reason = "overdue";
+        score = 100 + overdue * 2;
+      }
+
+      if (reason !== null) {
+        items.push({
+          jobId: r.jobId,
+          csrId: m.csrId,
+          csrName: m.csrName,
+          issue: r.issue,
+          priority: r.priority,
+          contact: r.contact,
+          jobDescription: r.jobDescription,
+          daysOpen: stale,
+          daysOverdue: overdue,
+          reason,
+          score,
+        });
+      }
+    }
+  }
+
+  items.sort((a, b) => b.score - a.score);
+  return items.slice(0, limit);
+}
+
 export function detectWorkloadImbalance(
   metrics: CsrMetrics[],
 ): ImbalanceFinding | null {

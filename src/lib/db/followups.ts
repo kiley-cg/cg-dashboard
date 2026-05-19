@@ -268,6 +268,78 @@ export async function getClosedSinceLastSnapshot(opts: {
   return arr[0] ? Number(arr[0].closed) : 0;
 }
 
+// --- Team-wide totals at a past point in time ----------------------------
+
+export interface TeamWorkloadPoint {
+  totalRecords: number;
+  totalIssues: number;
+}
+
+/**
+ * Sum the *latest* open snapshot per CSR taken before `before`. Used to
+ * compute day-over-day deltas on the team summary strip without re-scanning
+ * row data.
+ */
+export async function getTeamWorkloadBefore(
+  before: Date,
+): Promise<TeamWorkloadPoint> {
+  const rows = await db.execute<{
+    total_records: number | string;
+    total_issues: number | string;
+  }>(sql`
+    SELECT total_records, total_issues
+    FROM (
+      SELECT DISTINCT ON (csr_id)
+        csr_id, total_records, total_issues, snapshot_at
+      FROM followup_snapshots
+      WHERE follow_up_status = 'open'
+        AND snapshot_at < ${before.toISOString()}
+      ORDER BY csr_id, snapshot_at DESC
+    ) latest
+  `);
+  const arr = Array.from(
+    rows as Iterable<{
+      total_records: number | string;
+      total_issues: number | string;
+    }>,
+  );
+  return arr.reduce<TeamWorkloadPoint>(
+    (acc, r) => ({
+      totalRecords: acc.totalRecords + Number(r.total_records),
+      totalIssues: acc.totalIssues + Number(r.total_issues),
+    }),
+    { totalRecords: 0, totalIssues: 0 },
+  );
+}
+
+/**
+ * Open rows in the most recent open snapshot for the given CSR taken before
+ * `before`. Used by the CSR drill-down page to surface jobs added/closed
+ * since N days ago.
+ */
+export async function getCsrOpenRowsBefore(args: {
+  csrId: number;
+  before: Date;
+}): Promise<(typeof schema.followupRows.$inferSelect)[]> {
+  const snap = await db
+    .select({ id: schema.followupSnapshots.id })
+    .from(schema.followupSnapshots)
+    .where(
+      and(
+        eq(schema.followupSnapshots.csrId, args.csrId),
+        eq(schema.followupSnapshots.followUpStatus, "open"),
+        sql`${schema.followupSnapshots.snapshotAt} < ${args.before.toISOString()}`,
+      ),
+    )
+    .orderBy(desc(schema.followupSnapshots.snapshotAt))
+    .limit(1);
+  if (snap.length === 0) return [];
+  return db
+    .select()
+    .from(schema.followupRows)
+    .where(eq(schema.followupRows.snapshotId, snap[0].id));
+}
+
 // --- Recent snapshot timestamps for "Last updated" header -----------------
 
 export async function getMostRecentSnapshotAt(): Promise<Date | null> {
