@@ -17,15 +17,52 @@ export type RateEstimate = {
   serviceCode: string;
   serviceName: string;
   packages: number;
+  // The number the UI should display as "the" freight cost: negotiated
+  // when UPS returned it, otherwise list × calibration.
   totalCharge: number;
   // Pre-calibration list rate from UPS, kept for tooltip transparency
-  // when a calibration factor is applied.
+  // when a calibration factor is applied. Same as listTotalCharge.
   rawTotalCharge: number;
+  // UPS list rate (always present). Surfaced alongside negotiatedTotalCharge
+  // so reps can see both numbers side-by-side.
+  listTotalCharge: number;
+  // CG's contracted rate from UPS — only present when the account is
+  // configured to return it (account number + full Shipper address +
+  // UPS-side negotiated-rate disclosure enabled).
+  negotiatedTotalCharge: number | null;
   calibrationFactor: number;
   currency: string;
   transitDays: number | null;
   isNegotiated: boolean;
 };
+
+// CG's pickup-of-record on the UPS account. UPS only releases negotiated
+// rates when the Shipper block carries the full address that matches the
+// account (ZIP-only Shipper falls back to list). ShipFrom can still be the
+// vendor warehouse ZIP — UPS supports the split so the package physically
+// originates elsewhere while the bill-to + tariff come from CG's account.
+type ShipperAddress = {
+  name: string;
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+};
+
+function shipperAddress(): ShipperAddress | null {
+  const street = process.env.UPS_SHIPPER_STREET?.trim();
+  const city = process.env.UPS_SHIPPER_CITY?.trim();
+  const state = process.env.UPS_SHIPPER_STATE?.trim();
+  const zip = process.env.UPS_SHIPPER_ZIP?.trim();
+  if (!street || !city || !state || !zip) return null;
+  return {
+    name: process.env.UPS_SHIPPER_NAME?.trim() || "Color Graphics",
+    street,
+    city,
+    state,
+    zip,
+  };
+}
 
 // Calibration factor against real invoices. Job 32268 hit at exactly
 // 0.661 ($167.58 actual vs $253.35 raw quote), but we keep the
@@ -93,6 +130,7 @@ function pickGroundShipment(
 export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> {
   const token = await getUpsToken();
   const accountNumber = process.env.UPS_ACCOUNT_NUMBER?.trim();
+  const shipper = shipperAddress();
   const host = upsHost();
   const transId = `cg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -150,14 +188,26 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
         TransactionReference: { CustomerContext: "cg-inventory-check" },
       },
       Shipment: {
-        Shipper: {
-          ShipperNumber: accountNumber ?? undefined,
-          Address: {
-            PostalCode: input.fromZip,
-            StateProvinceCode: fromState,
-            CountryCode: "US",
-          },
-        },
+        Shipper: shipper
+          ? {
+              Name: shipper.name,
+              ShipperNumber: accountNumber ?? undefined,
+              Address: {
+                AddressLine: [shipper.street],
+                City: shipper.city,
+                StateProvinceCode: shipper.state,
+                PostalCode: shipper.zip,
+                CountryCode: "US",
+              },
+            }
+          : {
+              ShipperNumber: accountNumber ?? undefined,
+              Address: {
+                PostalCode: input.fromZip,
+                StateProvinceCode: fromState,
+                CountryCode: "US",
+              },
+            },
         ShipFrom: {
           Address: {
             PostalCode: input.fromZip,
@@ -242,13 +292,20 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
 
   const negotiated = rated.NegotiatedRateCharges?.TotalCharge;
   const list = rated.TotalCharges;
-  const charges = negotiated ?? list;
-  const rawTotalCharge = Number(charges?.MonetaryValue ?? "0");
-  const currency = charges?.CurrencyCode ?? "USD";
+  const listTotalCharge = Number(list?.MonetaryValue ?? "0");
+  const negotiatedTotalCharge = negotiated
+    ? Number(negotiated.MonetaryValue ?? "0")
+    : null;
+  // The "primary" total shown in the UI: real negotiated rate when UPS
+  // returned one, otherwise list × calibration as the best estimate.
+  // rawTotalCharge mirrors the value the calibration factor was applied
+  // to, kept separate so the tooltip can spell out "list $X × 0.75".
+  const rawTotalCharge = negotiatedTotalCharge ?? listTotalCharge;
+  const currency = (negotiated ?? list)?.CurrencyCode ?? "USD";
   // Apply the calibration factor only when we're falling back to list
   // rates. If UPS returned negotiated rates, the number is already
   // CG-specific and we shouldn't multiply it.
-  const factor = negotiated ? 1 : calibrationFactor();
+  const factor = negotiatedTotalCharge != null ? 1 : calibrationFactor();
   const totalCharge =
     Math.round((rawTotalCharge * factor + Number.EPSILON) * 100) / 100;
 
@@ -303,6 +360,8 @@ export async function getUpsGroundRate(input: RateInput): Promise<RateEstimate> 
     packages: packageCount,
     totalCharge,
     rawTotalCharge,
+    listTotalCharge,
+    negotiatedTotalCharge,
     calibrationFactor: factor,
     currency,
     transitDays: Number.isFinite(parsedTransit) ? parsedTransit : null,

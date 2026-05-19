@@ -6,10 +6,13 @@ import {
   getDailyTrend,
   getJobFirstSeenMap,
   getMostRecentSnapshotAt,
+  getTeamWorkloadBefore,
   type DailyTrendPoint,
 } from "@/lib/db/followups";
 import {
+  buildPriorityQueue,
   deriveCsrMetrics,
+  deriveTeamMetrics,
   detectWorkloadImbalance,
   generateTalkingPoints,
   getOldestOpenJobs,
@@ -25,6 +28,8 @@ import { JobsTable } from "./_components/JobsTable";
 import { TalkingPoints } from "./_components/TalkingPoints";
 import { OldestJobsList } from "./_components/OldestJobsList";
 import { ImbalanceBanner } from "./_components/ImbalanceBanner";
+import { TeamSummary } from "./_components/TeamSummary";
+import { PriorityQueue } from "./_components/PriorityQueue";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -64,10 +69,14 @@ export default async function DashboardPage() {
   }
 
   const today = todayInPacific();
-  const [bundles, mostRecent, firstSeen] = await Promise.all([
+  // 24 hours back, in absolute time — used to sum yesterday's open totals
+  // across the team for the day-over-day deltas on the summary strip.
+  const yesterdayCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [bundles, mostRecent, firstSeen, yesterdayTeam] = await Promise.all([
     getLatestSnapshotPerCsr(),
     getMostRecentSnapshotAt(),
     getJobFirstSeenMap(),
+    getTeamWorkloadBefore(yesterdayCutoff),
   ]);
 
   if (bundles.length === 0) {
@@ -113,6 +122,23 @@ export default async function DashboardPage() {
 
   const allRows = bundles.flatMap((b) => b.rows);
   const imbalance = detectWorkloadImbalance(metrics);
+  const team = deriveTeamMetrics(metrics);
+  const totalIssuesToday = metrics.reduce((s, m) => {
+    let n = 0;
+    for (const k of Object.keys(m.issueCounts) as Array<
+      keyof typeof m.issueCounts
+    >) {
+      if (k === "none") continue;
+      n += m.issueCounts[k] ?? 0;
+    }
+    return s + n;
+  }, 0);
+  const priorityItems = buildPriorityQueue({
+    metrics,
+    jobFirstSeen: firstSeen,
+    todayPacific: today,
+    limit: 15,
+  });
   const now = new Date();
 
   // Per-CSR talking points + oldest jobs, computed alongside the scorecard
@@ -163,10 +189,23 @@ export default async function DashboardPage() {
         </div>
       </header>
 
+      <TeamSummary
+        team={team}
+        yesterdayOpen={yesterdayTeam.totalRecords || null}
+        yesterdayIssues={yesterdayTeam.totalIssues || null}
+        totalIssuesToday={totalIssuesToday}
+      />
+
+      <PriorityQueue items={priorityItems} />
+
       <div className="grid gap-4 md:grid-cols-2">
         {enriched.map(({ m, bullets, oldest }) => (
           <div key={m.csrId} className="space-y-4">
-            <CsrScorecard m={m} />
+            <CsrScorecard
+              m={m}
+              team={team}
+              workloadTrend={trends.get(m.csrId)?.workload.map((p) => p.totalRecords)}
+            />
             <TalkingPoints bullets={bullets} csrName={m.csrName} />
             <OldestJobsList jobs={oldest} csrName={m.csrName} />
           </div>
