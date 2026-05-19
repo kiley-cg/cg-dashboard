@@ -118,6 +118,7 @@ export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
   type WalkResult = {
     color: SyncoreLineItem | null;
     sku: string | null;
+    productDescription: string | null;
     supplierId: number | null;
     supplierName: string | null;
     fallbackProductId: number | null;
@@ -127,6 +128,7 @@ export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
     const out: WalkResult = {
       color: null,
       sku: null,
+      productDescription: null,
       supplierId: null,
       supplierName: null,
       fallbackProductId: null,
@@ -136,7 +138,13 @@ export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
     while (cursor && !seen.has(cursor.line_id)) {
       seen.add(cursor.line_id);
       if (!out.color && cursor.type === "Color") out.color = cursor;
-      if (!out.sku && cursor.sku) out.sku = cursor.sku;
+      // The product-level line (Asi for product-wizard entries) carries
+      // both the SKU and the auto-filled product description — capture
+      // them together so they refer to the same line.
+      if (!out.sku && cursor.sku) {
+        out.sku = cursor.sku;
+        if (cursor.description) out.productDescription = cursor.description;
+      }
       if (!out.supplierId && cursor.supplier?.id != null) {
         out.supplierId = cursor.supplier.id;
       }
@@ -181,6 +189,7 @@ export function flattenLines(lines: SyncoreLineItem[]): FlatLineItem[] {
       sku,
       supplierId: line.supplier?.id ?? ctx.supplierId,
       supplierName: line.supplier?.name ?? ctx.supplierName,
+      productDescription: ctx.productDescription,
     });
   }
   return flat;

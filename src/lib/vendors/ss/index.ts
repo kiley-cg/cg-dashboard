@@ -48,10 +48,30 @@ type SSProduct = {
   warehouses?: SSWarehouse[];
 };
 
+// Each style lookup keeps *all* candidate styleIDs that share the input
+// key. Styles can collide on `styleName` alone (e.g. "220" is used by
+// Richardson, SoftShirts, and Paragon), so we resolve to a list and let
+// the caller disambiguate via product description / brandName.
+type Candidate = { styleId: number; brand: string };
 type StylesIndex = {
-  byKey: Map<string, number>;
+  byKey: Map<string, Candidate[]>;
   fetchedAt: number;
 };
+
+export class AmbiguousStyleError extends Error {
+  candidates: Array<{ brand: string; styleId: number }>;
+  constructor(
+    productId: string,
+    candidates: Array<{ brand: string; styleId: number }>,
+  ) {
+    const brands = candidates.map((c) => c.brand).filter(Boolean).join(", ");
+    super(
+      `S&S has ${candidates.length} products with style "${productId}"${brands ? ` (${brands})` : ""}. Fix the Syncore line to use a brand-prefixed style code (e.g. "Richardson ${productId}") so we know which one to pull.`,
+    );
+    this.name = "AmbiguousStyleError";
+    this.candidates = candidates;
+  }
+}
 
 let stylesCache: StylesIndex | null = null;
 let stylesPending: Promise<StylesIndex> | null = null;
@@ -96,21 +116,34 @@ async function loadStylesIndex(
     );
   }
   const styles = (await res.json()) as SSStyle[];
-  const byKey = new Map<string, number>();
+  const byKey = new Map<string, Candidate[]>();
+  const push = (key: string | undefined, c: Candidate) => {
+    if (!key) return;
+    const k = indexKey(key);
+    const list = byKey.get(k);
+    if (list) {
+      // Don't double-count the same styleID under multiple indexed keys
+      // for the same lookup string.
+      if (!list.some((x) => x.styleId === c.styleId)) list.push(c);
+    } else {
+      byKey.set(k, [c]);
+    }
+  };
   for (const s of styles) {
     if (s.styleID == null) continue;
-    if (s.styleName) byKey.set(indexKey(s.styleName), s.styleID);
-    if (s.uniqueStyleName) byKey.set(indexKey(s.uniqueStyleName), s.styleID);
-    if (s.partNumber) byKey.set(indexKey(s.partNumber), s.styleID);
+    const c: Candidate = { styleId: s.styleID, brand: s.brandName ?? "" };
+    push(s.styleName, c);
+    push(s.uniqueStyleName, c);
+    push(s.partNumber, c);
   }
   return { byKey, fetchedAt: Date.now() };
 }
 
-async function getStyleId(
+async function getCandidateStyleIds(
   styleName: string,
   base: string,
   authHeader: string,
-): Promise<number | null> {
+): Promise<Candidate[]> {
   const now = Date.now();
   if (!stylesCache || now - stylesCache.fetchedAt > STYLES_TTL_MS) {
     // Coalesce concurrent first-load requests so we don't hammer the index.
@@ -126,12 +159,35 @@ async function getStyleId(
     }
     await stylesPending;
   }
-  return stylesCache?.byKey.get(indexKey(styleName)) ?? null;
+  return stylesCache?.byKey.get(indexKey(styleName)) ?? [];
+}
+
+// Pick a candidate styleID when the S&S styleName lookup returned more
+// than one. Substring-matches each candidate's brand against the auto-
+// filled Syncore product description (which comes straight from the
+// vendor wizard, so it reliably contains the brand name). Returns null
+// when no candidate matches — caller throws AmbiguousStyleError.
+function disambiguateByDescription(
+  candidates: Candidate[],
+  description: string | null | undefined,
+): Candidate | null {
+  if (!description) return null;
+  const haystack = description.toLowerCase();
+  const matches = candidates.filter((c) => {
+    const b = c.brand?.trim().toLowerCase();
+    return b && haystack.includes(b);
+  });
+  if (matches.length === 1) return matches[0];
+  return null;
 }
 
 export async function fetchSSInventory(
   productId: string,
-  opts: { includeCosts?: boolean; includeWeights?: boolean } = {},
+  opts: {
+    includeCosts?: boolean;
+    includeWeights?: boolean;
+    productDescription?: string | null;
+  } = {},
 ): Promise<InventoryLine[]> {
   const accountNumber = process.env.SS_WS_ID?.trim();
   const apiKey = process.env.SS_WS_PASSWORD?.trim();
@@ -145,11 +201,21 @@ export async function fetchSSInventory(
   );
   const authHeader = basicAuthHeader(accountNumber, apiKey);
 
-  const styleID = await getStyleId(productId, base, authHeader);
-  if (styleID == null) {
+  const candidates = await getCandidateStyleIds(productId, base, authHeader);
+  if (candidates.length === 0) {
     throw new Error(
       `S&S has no style "${productId}" — not in your account's catalog (may be discontinued, misspelled, or the supplier on this Syncore line is incorrect).`,
     );
+  }
+  let styleID: number;
+  if (candidates.length === 1) {
+    styleID = candidates[0].styleId;
+  } else {
+    const picked = disambiguateByDescription(candidates, opts.productDescription);
+    if (!picked) {
+      throw new AmbiguousStyleError(productId, candidates);
+    }
+    styleID = picked.styleId;
   }
 
   const params = new URLSearchParams({

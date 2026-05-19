@@ -298,6 +298,20 @@ export function LineItemRow({
               </pre>
             )}
           </div>
+        ) : lookup.status === "ambiguous" ? (
+          <div className="flex flex-col items-end gap-1">
+            <Badge tone="danger">Ambiguous style</Badge>
+            <p className="text-cg-n-700 text-[10px] max-w-[22rem] text-right">
+              S&amp;S has {lookup.candidates.length} products with style
+              &ldquo;{lookup.productId}&rdquo;:{" "}
+              <span className="font-semibold">
+                {lookup.candidates
+                  .map((c) => c.brand || `id ${c.styleId}`)
+                  .join(", ")}
+              </span>
+              . Fix in Syncore (e.g. &ldquo;{lookup.candidates[0]?.brand || "Brand"} {lookup.productId}&rdquo;).
+            </p>
+          </div>
         ) : lookup.status === "no-style" ? (
           <Badge tone="neutral">No SKU</Badge>
         ) : (
