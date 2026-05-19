@@ -9,9 +9,9 @@ import {
   findVerificationsForJob,
   isJobAutoVerifyDisabled,
 } from "@/lib/db/verifications";
-import { pickConsolidationWarehouse, pickPrimaryWarehouse, computeSplit } from "@/lib/vendors/warehouse-priority";
+import { pickConsolidationWarehouse } from "@/lib/vendors/warehouse-priority";
 import { matchVariant } from "@/lib/vendors/match";
-import { estimateFreight, type FreightShipmentInput } from "@/lib/ups/freight";
+import { estimateFreight } from "@/lib/ups/freight";
 import { LineItemRow } from "@/components/LineItemRow";
 import { Badge } from "@/components/Badge";
 import { ClearVerificationsButton } from "@/components/ClearVerificationsButton";
@@ -51,12 +51,18 @@ export default async function JobPage({ params, searchParams }: Props) {
   // implies weights=1 even when costs=0.
   const includeFreight = flagOn(sp.freight);
   const includeWeights = includeFreight;
-  const freightFromZip = cleanZip(sp.fromZip);
-  const freightToZip = cleanZip(sp.toZip);
-  // Decorator-leg quote only fires when the rep has explicitly entered
-  // both ZIPs — no implicit "default to CG home" or "default to decorator
-  // zip" fallback, since those silently steered every quote at the same
-  // pair regardless of the actual job's destination.
+  // Track explicit (URL-param) vs. defaulted ZIPs separately so toggle
+  // links only preserve what the rep actually typed — otherwise the URL
+  // would balloon with defaults that the next page load would re-supply.
+  const explicitFromZip = cleanZip(sp.fromZip);
+  const explicitToZip = cleanZip(sp.toZip);
+  // FROM defaults to the selected decorator's ZIP (Frontier 97002 / OSI
+  // 97232). TO defaults to UPS_SHIPPER_ZIP, which is the same address
+  // already used as the shipper identity for UPS negotiated rates — i.e.
+  // Color Graphics. Either can be overridden in the form on this page.
+  const cgZip = cleanZip(process.env.UPS_SHIPPER_ZIP);
+  const freightFromZip = explicitFromZip ?? decorator.zip;
+  const freightToZip = explicitToZip ?? cgZip;
   const canQuoteFreight = !!(freightFromZip && freightToZip);
   const session = await auth();
   const userId = session?.user?.id;
@@ -237,10 +243,10 @@ export default async function JobPage({ params, searchParams }: Props) {
           if (c) next.set("costs", "1");
           if (f) next.set("freight", "1");
           if (d !== DEFAULT_DECORATOR_ID) next.set("decorator", d);
-          // Preserve the freight ZIPs across toggle clicks so the quote
-          // doesn't disappear when the rep flips costs on/off.
-          if (freightFromZip) next.set("fromZip", freightFromZip);
-          if (freightToZip) next.set("toZip", freightToZip);
+          // Preserve only ZIPs the rep explicitly typed; defaulted values
+          // will re-default on the next page load.
+          if (explicitFromZip) next.set("fromZip", explicitFromZip);
+          if (explicitToZip) next.set("toZip", explicitToZip);
           const qs = next.toString();
           return `/jobs/${id}${qs ? `?${qs}` : ""}`;
         };
@@ -358,10 +364,21 @@ export default async function JobPage({ params, searchParams }: Props) {
                   currency: decoratorFreight.currency,
                 });
               const hasNegotiated = s.estimate.negotiatedTotalCharge != null;
+              const originLabel =
+                freightFromZip === decorator.zip
+                  ? decorator.name
+                  : `ZIP ${freightFromZip}`;
+              const destinationLabel =
+                cgZip && freightToZip === cgZip
+                  ? "Color Graphics"
+                  : `ZIP ${freightToZip}`;
               return (
                 <div className="mt-3">
+                  <p className="text-cg-n-500 text-[10px] uppercase tracking-wider font-semibold">
+                    Freight: {originLabel} → {destinationLabel}
+                  </p>
                   {hasNegotiated ? (
-                    <div className="flex items-baseline gap-4 flex-wrap">
+                    <div className="flex items-baseline gap-4 flex-wrap mt-1">
                       <div>
                         <p className="text-cg-n-500 text-[10px] uppercase tracking-wider font-semibold">
                           Negotiated
@@ -380,12 +397,11 @@ export default async function JobPage({ params, searchParams }: Props) {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-2xl font-bold tabular-nums">
+                    <p className="text-2xl font-bold tabular-nums mt-1">
                       {fmt(decoratorFreight.totalCharge)}
                     </p>
                   )}
                   <p className="text-cg-n-500 text-xs mt-1">
-                    {freightFromZip} → {freightToZip}:{" "}
                     {s.weight.totalQty.toLocaleString()} pcs ·{" "}
                     {s.weight.totalWeightLbs} lbs · {s.estimate.packages} pkg
                     {s.estimate.transitDays != null
@@ -424,14 +440,13 @@ export default async function JobPage({ params, searchParams }: Props) {
           </div>
         )}
 
-        {await Promise.all(enriched.map(async ({ salesOrder: so, rows }) => {
-          // Warehouse priority and per-SO freight are both about the
-          // vendor → decorator leg (vendors ship blanks to the decorator,
-          // not directly to the end customer), so rank against the
-          // decorator's zip — Frontier 97002, OSI 97232 — not the sales
-          // order's customer ship-to. For BB18007 with a SE customer,
-          // this is the difference between picking Jacksonville (closest
-          // to customer) and Phoenix (closest to Frontier in OR).
+        {enriched.map(({ salesOrder: so, rows }) => {
+          // Warehouse priority is about the vendor → decorator leg (vendors
+          // ship blanks to the decorator, not directly to the end customer),
+          // so rank against the decorator's zip — Frontier 97002, OSI 97232
+          // — not the sales order's customer ship-to. For BB18007 with a SE
+          // customer, this is the difference between picking Jacksonville
+          // (closest to customer) and Phoenix (closest to Frontier in OR).
           const shipToZip = decorator.zip;
 
           // Multi-line consolidation: if a single warehouse can fulfill
@@ -448,105 +463,6 @@ export default async function JobPage({ params, searchParams }: Props) {
             }),
             shipToZip,
           );
-
-          // Per-SO freight estimate via UPS Ratetimeintransit.
-          // Only attempted when consolidation worked (one origin warehouse).
-          // Multi-warehouse splits → skipped (would need N quotes summed).
-          const consolidationWarehouse = consolidationWarehouseId
-            ? rows
-                .map((r) => {
-                  const lookup = r.lookup;
-                  if (lookup.status !== "ok") return null;
-                  return lookup.lines
-                    .flatMap((l) => l.warehouses ?? [])
-                    .find((w) => w.id === consolidationWarehouseId);
-                })
-                .find((w) => w != null) ?? null
-            : null;
-          // Build per-warehouse shipments by replicating the same Ships-from
-          // logic used in LineItemRow: honor the SO consolidation warehouse
-          // when it covers the line; otherwise pick the highest-priority
-          // warehouse with full stock; otherwise allocate via computeSplit
-          // across multiple warehouses. Then group lines by warehouse so we
-          // can hit UPS once per warehouse and sum the totals.
-          const shipmentMap = new Map<
-            string,
-            {
-              warehouse: { id: string; name?: string };
-              lines: Array<{
-                qtyOrdered: number;
-                pieceWeightLbs: number | null;
-              }>;
-            }
-          >();
-          function addToShipment(
-            warehouse: { id: string; name?: string },
-            qty: number,
-            pieceWeightLbs: number | null,
-          ) {
-            if (qty <= 0) return;
-            const existing = shipmentMap.get(warehouse.id);
-            if (existing) {
-              existing.lines.push({ qtyOrdered: qty, pieceWeightLbs });
-            } else {
-              shipmentMap.set(warehouse.id, {
-                warehouse: { id: warehouse.id, name: warehouse.name },
-                lines: [{ qtyOrdered: qty, pieceWeightLbs }],
-              });
-            }
-          }
-          for (const { line, lookup } of okRows) {
-            if (lookup.status !== "ok") continue;
-            const matched = matchVariant(lookup, line.color, line.size);
-            const warehouses = (matched?.warehouses ?? []).filter(
-              (w) => w.quantity > 0,
-            );
-            if (warehouses.length === 0) continue;
-            const pieceWeightLbs = matched?.pieceWeightLbs ?? null;
-
-            // Honor consolidation if it can cover this line.
-            let primary: { id: string; name?: string } | null = null;
-            if (consolidationWarehouseId) {
-              primary =
-                warehouses.find(
-                  (w) =>
-                    w.id === consolidationWarehouseId &&
-                    w.quantity >= line.qtyOrdered,
-                ) ?? null;
-            }
-            if (!primary) {
-              primary = pickPrimaryWarehouse(
-                warehouses,
-                line.qtyOrdered,
-                shipToZip,
-              );
-            }
-            if (primary) {
-              addToShipment(primary, line.qtyOrdered, pieceWeightLbs);
-            } else {
-              // Line must split across warehouses.
-              const split = computeSplit(
-                warehouses,
-                line.qtyOrdered,
-                shipToZip,
-              );
-              for (const a of split.allocations) {
-                addToShipment(a.warehouse, a.qty, pieceWeightLbs);
-              }
-            }
-          }
-          const shipments: FreightShipmentInput[] = Array.from(
-            shipmentMap.values(),
-          ).map((s) => ({
-            fromWarehouse: s.warehouse,
-            lines: s.lines,
-          }));
-          const freight = !includeFreight
-            ? ({ status: "skipped", reason: "Freight off — toggle 'Freight' above to quote." } as const)
-            : await estimateFreight({
-                toZip: shipToZip,
-                shipments,
-              });
 
           return (
           <div
@@ -567,123 +483,6 @@ export default async function JobPage({ params, searchParams }: Props) {
                 {consolidationWarehouseId && (
                   <p className="text-cg-success text-[11px] mt-1">
                     Consolidates to a single warehouse
-                  </p>
-                )}
-                {freight.status === "ok" && (() => {
-                  const totalWeight = freight.shipments.reduce(
-                    (n, s) => n + s.weight.totalWeightLbs,
-                    0,
-                  );
-                  const totalPackages = freight.shipments.reduce(
-                    (n, s) => n + s.estimate.packages,
-                    0,
-                  );
-                  const totalQty = freight.shipments.reduce(
-                    (n, s) => n + s.weight.totalQty,
-                    0,
-                  );
-                  const realWeightLines = freight.shipments.reduce(
-                    (n, s) => n + s.weight.linesWithRealWeight,
-                    0,
-                  );
-                  const totalLines = freight.shipments.reduce(
-                    (n, s) => n + s.weight.totalLines,
-                    0,
-                  );
-                  const listTotal = freight.shipments.reduce(
-                    (n, s) => n + s.estimate.listTotalCharge,
-                    0,
-                  );
-                  const negotiatedTotal = freight.shipments.every(
-                    (s) => s.estimate.negotiatedTotalCharge != null,
-                  )
-                    ? freight.shipments.reduce(
-                        (n, s) =>
-                          n + (s.estimate.negotiatedTotalCharge as number),
-                        0,
-                      )
-                    : null;
-                  const fmt = (n: number) =>
-                    n.toLocaleString("en-US", {
-                      style: "currency",
-                      currency: freight.currency,
-                    });
-                  const tooltipLines: string[] = [
-                    `UPS Ground · ${freight.shipments.length} shipment${freight.shipments.length === 1 ? "" : "s"} · ${negotiatedTotal != null ? "negotiated rate" : "list rate × calibration"}`,
-                    `Destination zip: ${shipToZip ?? "98512"}`,
-                    `Quantity: ${totalQty.toLocaleString()} pieces across ${totalLines} line${totalLines === 1 ? "" : "s"}`,
-                    `Real vendor weights: ${realWeightLines} of ${totalLines} line${totalLines === 1 ? "" : "s"}`,
-                    `Total weight: ${totalWeight} lbs across ${totalPackages} package${totalPackages === 1 ? "" : "s"} (≤70 lb each, 24×16×16 in default dims)`,
-                    "",
-                    `List rate total: ${fmt(listTotal)}`,
-                    negotiatedTotal != null
-                      ? `Negotiated total: ${fmt(negotiatedTotal)}`
-                      : `Negotiated rate: not returned by UPS (showing list × ${freight.shipments[0].estimate.calibrationFactor.toFixed(2)} calibration)`,
-                    "",
-                  ];
-                  for (const s of freight.shipments) {
-                    tooltipLines.push(
-                      `• ${s.warehouseName} (${s.fromZip}): ${s.weight.totalQty.toLocaleString()} pcs · ${s.weight.totalWeightLbs} lbs · ${s.estimate.packages} pkg · ${s.estimate.transitDays != null ? `~${s.estimate.transitDays}d` : "transit ?"} · list ${fmt(s.estimate.listTotalCharge)}${s.estimate.negotiatedTotalCharge != null ? ` · negotiated ${fmt(s.estimate.negotiatedTotalCharge)}` : ""}`,
-                    );
-                  }
-                  if (freight.skipped.length > 0) {
-                    tooltipLines.push("", "Could not quote:");
-                    for (const sk of freight.skipped) {
-                      tooltipLines.push(`• ${sk.warehouseName}: ${sk.reason}`);
-                    }
-                  }
-                  tooltipLines.push(
-                    "",
-                    "Box dimensions use a default; precise dims would require an extra SanMar API call per style.",
-                  );
-                  return (
-                    <p
-                      className="text-cg-n-700 text-[11px] mt-1 tabular-nums"
-                      title={tooltipLines.join("\n")}
-                    >
-                      Estimated freight:{" "}
-                      {negotiatedTotal != null ? (
-                        <>
-                          <span className="font-semibold">
-                            {fmt(negotiatedTotal)}
-                          </span>{" "}
-                          <span className="text-cg-n-500">
-                            (list {fmt(listTotal)})
-                          </span>
-                        </>
-                      ) : (
-                        <span className="font-semibold">
-                          {fmt(freight.totalCharge)}
-                        </span>
-                      )}{" "}
-                      Ground
-                      {freight.maxTransitDays != null
-                        ? ` · ~${freight.maxTransitDays}-day transit`
-                        : ""}
-                      {" · "}
-                      {totalWeight} lbs
-                      {freight.shipments.length > 1
-                        ? ` · ${freight.shipments.length} shipments`
-                        : ""}
-                      {freight.skipped.length > 0
-                        ? ` · ${freight.skipped.length} unquoted`
-                        : ""}
-                      {" · "}
-                      <span className="text-cg-n-500">hover for details</span>
-                    </p>
-                  );
-                })()}
-                {freight.status === "skipped" && (
-                  <p className="text-cg-n-400 text-[10px] mt-1">
-                    Freight estimate: {freight.reason}
-                  </p>
-                )}
-                {freight.status === "error" && (
-                  <p
-                    className="text-cg-danger text-[10px] mt-1"
-                    title={freight.message}
-                  >
-                    Freight estimate failed (hover for details)
                   </p>
                 )}
               </div>
@@ -738,7 +537,7 @@ export default async function JobPage({ params, searchParams }: Props) {
             </table>
           </div>
           );
-        }))}
+        })}
       </div>
     </section>
   );

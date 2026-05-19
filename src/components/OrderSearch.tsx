@@ -10,6 +10,7 @@ export function OrderSearch() {
   const [value, setValue] = useState("");
   const [costs, setCosts] = useState(false);
   const [freight, setFreight] = useState(false);
+  const [dropShipZip, setDropShipZip] = useState("");
   const [decoratorId, setDecoratorId] = useState(DEFAULT_DECORATOR_ID);
   const [pending, startTransition] = useTransition();
 
@@ -22,6 +23,10 @@ export function OrderSearch() {
     if (freight) params.set("freight", "1");
     if (decoratorId !== DEFAULT_DECORATOR_ID) {
       params.set("decorator", decoratorId);
+    }
+    if (freight) {
+      const zip = dropShipZip.trim();
+      if (zip) params.set("toZip", zip);
     }
     const qs = params.toString();
     const url = `/jobs/${encodeURIComponent(trimmed)}${qs ? `?${qs}` : ""}`;
@@ -111,6 +116,25 @@ export function OrderSearch() {
           );
         })}
       </div>
+      {freight && (
+        <div className="flex items-center gap-3 text-xs">
+          <label className="flex items-center gap-2">
+            <span className="text-cg-n-500 uppercase tracking-wider font-semibold">
+              Drop-ship to ZIP
+            </span>
+            <input
+              type="text"
+              value={dropShipZip}
+              onChange={(e) => setDropShipZip(e.target.value)}
+              placeholder="blank = Color Graphics"
+              inputMode="numeric"
+              maxLength={10}
+              disabled={pending}
+              className="w-44 bg-white border border-cg-n-200 rounded px-2 py-1 text-cg-n-900 placeholder-cg-n-400 tabular-nums focus:outline-none focus:border-cg-red focus:ring-2 focus:ring-cg-red-100"
+            />
+          </label>
+        </div>
+      )}
       <p className="text-cg-n-500 text-[11px]">
         Skipping costs/freight speeds up availability-only checks.
       </p>
