@@ -180,4 +180,10 @@ export type FlatLineItem = {
   sku: string | null;
   supplierId: number | null;
   supplierName: string | null;
+  // Description of the product line that supplied the SKU (auto-filled in
+  // Syncore from the vendor's product wizard, e.g. "Richardson 220
+  // Relaxed Performance Lite Cap"). Used to disambiguate vendor lookups
+  // when a style number is shared across multiple products (S&S allows
+  // this; e.g. style 220 → Richardson cap, SoftShirts tee, Paragon hoodie).
+  productDescription: string | null;
 };

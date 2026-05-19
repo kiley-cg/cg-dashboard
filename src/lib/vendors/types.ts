@@ -49,4 +49,19 @@ export type InventoryLookupError = {
   message: string;
 };
 
-export type InventoryLookup = InventoryLookupOk | InventoryLookupError;
+// Style number resolved to more than one product in the vendor catalog
+// (S&S allows this — e.g. style "220" → Richardson cap, SoftShirts tee,
+// Paragon hoodie). Surfaces the brand candidates so the rep can fix the
+// Syncore line by switching to a brand-prefixed style code.
+export type InventoryLookupAmbiguous = {
+  status: "ambiguous";
+  vendor: VendorCode;
+  productId: string;
+  message: string;
+  candidates: Array<{ brand: string; styleId: number }>;
+};
+
+export type InventoryLookup =
+  | InventoryLookupOk
+  | InventoryLookupError
+  | InventoryLookupAmbiguous;

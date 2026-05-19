@@ -1,6 +1,6 @@
 import type { FlatLineItem } from "../syncore/types";
 import { fetchSanMarInventory } from "./sanmar";
-import { fetchSSInventory } from "./ss";
+import { AmbiguousStyleError, fetchSSInventory } from "./ss";
 import { fetchCutterBuckInventory } from "./cb";
 import type { InventoryLookup, VendorCode } from "./types";
 
@@ -27,6 +27,10 @@ function resolveVendor(supplierName: string | null): VendorCode {
 export type LookupOptions = {
   includeCosts?: boolean;
   includeWeights?: boolean;
+  // Auto-filled product description from Syncore (e.g. "Richardson 220
+  // Relaxed Performance Lite Cap"). Adapters use this to disambiguate
+  // when a style number maps to multiple products in the vendor catalog.
+  productDescription?: string | null;
 };
 
 export async function lookupInventory(
@@ -54,15 +58,31 @@ export async function lookupInventory(
     };
   }
 
+  // Description comes from the Syncore line by default; callers can
+  // override it via opts (rare — useful for testing or manual overrides).
+  const adapterOpts: LookupOptions = {
+    ...opts,
+    productDescription: opts.productDescription ?? line.productDescription,
+  };
+
   try {
     const lines =
       vendor === "sanmar"
-        ? await fetchSanMarInventory(productId, opts)
+        ? await fetchSanMarInventory(productId, adapterOpts)
         : vendor === "ss"
-          ? await fetchSSInventory(productId, opts)
-          : await fetchCutterBuckInventory(productId, opts);
+          ? await fetchSSInventory(productId, adapterOpts)
+          : await fetchCutterBuckInventory(productId, adapterOpts);
     return { status: "ok", vendor, productId, lines };
   } catch (err) {
+    if (err instanceof AmbiguousStyleError) {
+      return {
+        status: "ambiguous",
+        vendor,
+        productId,
+        message: err.message,
+        candidates: err.candidates,
+      };
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error(
       `[inventory] ${vendor} lookup failed for productId=${productId}`,
