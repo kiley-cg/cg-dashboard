@@ -104,10 +104,14 @@ export function CsrScorecard({
   m,
   team,
   workloadTrend,
+  avgClosedPerDay,
 }: {
   m: CsrMetrics;
   team?: TeamMetrics;
   workloadTrend?: number[];
+  // 7-day rolling average of follow-ups closed per day. Optional — only
+  // surfaced when the page passes it in (main dashboard + drill-down do).
+  avgClosedPerDay?: number;
 }) {
   const total = Math.max(
     1,
@@ -221,6 +225,13 @@ export function CsrScorecard({
               : "neutral"
           }
         />
+        {avgClosedPerDay !== undefined && (
+          <Stat
+            label="Avg closed/day"
+            value={avgClosedPerDay.toFixed(1)}
+            tone={avgClosedPerDay >= 5 ? "good" : "neutral"}
+          />
+        )}
       </div>
 
       <div className="mb-5">
