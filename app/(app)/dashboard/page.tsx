@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { isManager } from "@/lib/managers";
 import {
+  getCsrDailyHistory,
   getLatestSnapshotPerCsr,
   getDailyTrend,
   getJobFirstSeenMap,
@@ -110,18 +111,26 @@ export default async function DashboardPage() {
     });
   });
 
-  // 30-day trend per CSR (one point/day, end-of-day snapshot).
+  // 30-day trend per CSR (one point/day, end-of-day snapshot) + 7-day
+  // closed-per-day rolling for the "Avg closed/day" stat on each scorecard.
   const trends = new Map<
     number,
     { workload: DailyTrendPoint[]; overdue: DailyTrendPoint[] }
   >();
+  const avgClosedByCsrId = new Map<number, number>();
   await Promise.all(
     metrics.map(async (m) => {
-      const [workload, overdue] = await Promise.all([
+      const [workload, overdue, history] = await Promise.all([
         getDailyTrend({ csrId: m.csrId, status: "open", days: 30 }),
         getDailyTrend({ csrId: m.csrId, status: "open", days: 30 }),
+        getCsrDailyHistory({ csrId: m.csrId, days: 7 }),
       ]);
       trends.set(m.csrId, { workload, overdue });
+      const avg =
+        history.length === 0
+          ? 0
+          : history.reduce((s, p) => s + p.closedThatDay, 0) / history.length;
+      avgClosedByCsrId.set(m.csrId, avg);
     }),
   );
 
@@ -210,6 +219,7 @@ export default async function DashboardPage() {
               m={m}
               team={team}
               workloadTrend={trends.get(m.csrId)?.workload.map((p) => p.totalRecords)}
+              avgClosedPerDay={avgClosedByCsrId.get(m.csrId)}
             />
             <TalkingPoints bullets={bullets} csrName={m.csrName} />
             <OldestJobsList jobs={oldest} csrName={m.csrName} />

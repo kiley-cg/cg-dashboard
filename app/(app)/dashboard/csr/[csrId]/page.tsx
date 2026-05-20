@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { isManager } from "@/lib/managers";
 import {
+  getCsrDailyHistory,
   getLatestSnapshotPerCsr,
   getDailyTrend,
   getJobFirstSeenMap,
@@ -19,6 +20,7 @@ import {
   type CsrMetrics,
 } from "../../_lib/compute";
 import { CsrScorecard } from "../../_components/CsrScorecard";
+import { DailyHistoryTable } from "../../_components/DailyHistoryTable";
 import { JobsTable } from "../../_components/JobsTable";
 import { TalkingPoints } from "../../_components/TalkingPoints";
 import { OldestJobsList } from "../../_components/OldestJobsList";
@@ -75,10 +77,19 @@ export default async function CsrDetailPage({ params }: Props) {
   const m = allMetrics.find((x) => x.csrId === csrId);
   if (!m) notFound();
 
-  const [workloadTrend, issuesTrend] = await Promise.all([
+  const [workloadTrend, issuesTrend, dailyHistory] = await Promise.all([
     getDailyTrend({ csrId, status: "open", days: 30 }),
     getDailyTrend({ csrId, status: "open", days: 30 }),
+    getCsrDailyHistory({ csrId, days: 30 }),
   ]);
+
+  // 7-day rolling close rate for the scorecard stat (consistent with main
+  // dashboard).
+  const last7 = dailyHistory.slice(-7);
+  const avgClosedPerDay =
+    last7.length === 0
+      ? 0
+      : last7.reduce((s, p) => s + p.closedThatDay, 0) / last7.length;
 
   // What changed this week — diff today's open rows against the snapshot
   // closest to 7 days ago.
@@ -133,7 +144,12 @@ export default async function CsrDetailPage({ params }: Props) {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
-          <CsrScorecard m={m} team={team} workloadTrend={workloadPoints} />
+          <CsrScorecard
+            m={m}
+            team={team}
+            workloadTrend={workloadPoints}
+            avgClosedPerDay={avgClosedPerDay}
+          />
           <TalkingPoints bullets={bullets} csrName={m.csrName} />
         </div>
 
@@ -157,6 +173,8 @@ export default async function CsrDetailPage({ params }: Props) {
           />
         </div>
       </div>
+
+      <DailyHistoryTable history={dailyHistory} />
 
       <OldestJobsList jobs={oldest} csrName={m.csrName} />
 

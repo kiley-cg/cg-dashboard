@@ -268,6 +268,91 @@ export async function getClosedSinceLastSnapshot(opts: {
   return arr[0] ? Number(arr[0].closed) : 0;
 }
 
+export interface DailyHistoryPoint {
+  date: string; // YYYY-MM-DD
+  openAtEod: number; // open follow-ups at end of day
+  closedThatDay: number; // jobs in prior day's open list but not this day's
+}
+
+/**
+ * Per-day open count + closed-count for a CSR, for the last N days.
+ * "Closed that day" is computed by diffing job IDs across the EOD open
+ * snapshots — same approach as the "Closed today" team tile. Returns N
+ * entries (we fetch N+1 days of snapshots internally so day 1 has a
+ * comparison baseline).
+ */
+export async function getCsrDailyHistory(opts: {
+  csrId: number;
+  days: number;
+}): Promise<DailyHistoryPoint[]> {
+  const fetchDays = opts.days + 1;
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - fetchDays);
+
+  const rows = await db.execute<{
+    day: string;
+    total_records: number | string;
+    job_id: number | string | null;
+  }>(sql`
+    WITH eod AS (
+      SELECT DISTINCT ON (date_trunc('day', snapshot_at))
+        id AS snapshot_id,
+        to_char(date_trunc('day', snapshot_at), 'YYYY-MM-DD') AS day,
+        total_records
+      FROM followup_snapshots
+      WHERE csr_id = ${opts.csrId}
+        AND follow_up_status = 'open'
+        AND snapshot_at >= ${since.toISOString()}
+      ORDER BY date_trunc('day', snapshot_at) DESC, snapshot_at DESC
+    )
+    SELECT eod.day, eod.total_records, r.job_id
+    FROM eod
+    LEFT JOIN followup_rows r ON r.snapshot_id = eod.snapshot_id
+    ORDER BY eod.day ASC
+  `);
+
+  const arr = Array.from(
+    rows as Iterable<{
+      day: string;
+      total_records: number | string;
+      job_id: number | string | null;
+    }>,
+  );
+
+  // Group rows by day.
+  type DayBucket = { totalRecords: number; jobIds: Set<number> };
+  const byDay = new Map<string, DayBucket>();
+  for (const row of arr) {
+    let entry = byDay.get(row.day);
+    if (!entry) {
+      entry = { totalRecords: Number(row.total_records), jobIds: new Set() };
+      byDay.set(row.day, entry);
+    }
+    if (row.job_id != null) {
+      const id = Number(row.job_id);
+      if (Number.isFinite(id)) entry.jobIds.add(id);
+    }
+  }
+
+  // Build the result: for each day after the first, diff against prior day.
+  const dayKeys = [...byDay.keys()].sort();
+  const result: DailyHistoryPoint[] = [];
+  for (let i = 1; i < dayKeys.length; i++) {
+    const today = byDay.get(dayKeys[i])!;
+    const yesterday = byDay.get(dayKeys[i - 1])!;
+    let closed = 0;
+    for (const id of yesterday.jobIds) {
+      if (!today.jobIds.has(id)) closed++;
+    }
+    result.push({
+      date: dayKeys[i],
+      openAtEod: today.totalRecords,
+      closedThatDay: closed,
+    });
+  }
+  return result;
+}
+
 // --- Team-wide totals at a past point in time ----------------------------
 
 export interface TeamWorkloadPoint {
