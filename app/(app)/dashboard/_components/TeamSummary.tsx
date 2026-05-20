@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { TeamMetrics } from "../_lib/compute";
 
 interface Props {
@@ -36,11 +37,13 @@ export function TeamSummary({
         label="Overdue"
         value={team.totalOverdue}
         tone={team.totalOverdue > 0 ? "bad" : "good"}
+        href={team.totalOverdue > 0 ? "?overdue=1#jobs" : undefined}
       />
       <Tile
         label="Stale Crit/Rush"
         value={team.totalStaleCriticalRush}
         tone={team.totalStaleCriticalRush > 0 ? "bad" : "good"}
+        href={team.totalStaleCriticalRush > 0 ? "?stale=1#jobs" : undefined}
       />
       <Tile
         label="Over workload"
@@ -64,6 +67,7 @@ function Tile({
   sub,
   tone = "neutral",
   higherIsWorse = false,
+  href,
 }: {
   label: string;
   value: number | string;
@@ -71,6 +75,7 @@ function Tile({
   sub?: string;
   tone?: "neutral" | "warn" | "bad" | "good";
   higherIsWorse?: boolean;
+  href?: string;
 }) {
   const valueColor =
     tone === "bad"
@@ -81,8 +86,8 @@ function Tile({
           ? "text-cg-success"
           : "text-cg-n-900";
 
-  return (
-    <div className="rounded-card border border-cg-n-200 bg-white p-4 shadow-sm">
+  const body = (
+    <>
       <div className="text-[10px] uppercase tracking-wide text-cg-n-500 font-semibold">
         {label}
       </div>
@@ -97,6 +102,26 @@ function Tile({
       {sub && (
         <div className="mt-0.5 text-[11px] text-cg-n-500">{sub}</div>
       )}
+      {href && (
+        <div className="mt-1 text-[10px] text-cg-info">View jobs ↓</div>
+      )}
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="rounded-card border border-cg-n-200 bg-white p-4 shadow-sm hover:border-cg-red-300 hover:shadow-md transition block"
+      >
+        {body}
+      </Link>
+    );
+  }
+
+  return (
+    <div className="rounded-card border border-cg-n-200 bg-white p-4 shadow-sm">
+      {body}
     </div>
   );
 }

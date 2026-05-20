@@ -64,17 +64,33 @@ export function JobsTable({ rows, todayPacific }: Props) {
   const [statusFilter, setStatusFilter] = useState<"open" | "completed" | "all">(
     "open",
   );
+  const [overdueFilter, setOverdueFilter] = useState(false);
+  const [staleFilter, setStaleFilter] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("priority");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  // Heatmap cells link here with ?csr=…&issue=…; sync those params into local
-  // filter state so the table refilters when the user clicks one.
+  // Heatmap cells and TeamSummary tiles link here with query params; sync
+  // them into local filter state so the table refilters on click.
   useEffect(() => {
     const csr = searchParams.get("csr");
     const issue = searchParams.get("issue");
+    const overdue = searchParams.get("overdue");
+    const stale = searchParams.get("stale");
     if (csr !== null) setCsrFilter(csr);
     if (issue !== null) setIssueFilter(issue);
+    if (overdue !== null) setOverdueFilter(overdue === "1");
+    if (stale !== null) setStaleFilter(stale === "1");
   }, [searchParams]);
+
+  const isCriticalPriority = (p: string | null) => {
+    const lc = p?.trim().toLowerCase();
+    return lc === "critical rush" || lc === "critical";
+  };
+
+  const isOverdueRow = (fuDate: string | null) =>
+    !!fuDate &&
+    /^\d{4}-\d{2}-\d{2}$/.test(fuDate) &&
+    fuDate < todayPacific;
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -84,9 +100,14 @@ export function JobsTable({ rows, todayPacific }: Props) {
         const kind = issueKindFromLabel(r.issue);
         if (kind !== issueFilter) return false;
       }
+      if (overdueFilter && !isOverdueRow(r.fuDate)) return false;
+      if (staleFilter) {
+        if (!isCriticalPriority(r.priority)) return false;
+        if (!isOverdueRow(r.fuDate)) return false;
+      }
       return true;
     });
-  }, [rows, csrFilter, issueFilter, statusFilter]);
+  }, [rows, csrFilter, issueFilter, statusFilter, overdueFilter, staleFilter, todayPacific]);
 
   const sorted = useMemo(() => {
     const sign = sortDir === "asc" ? 1 : -1;
@@ -153,6 +174,30 @@ export function JobsTable({ rows, todayPacific }: Props) {
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            onClick={() => setOverdueFilter((v) => !v)}
+            aria-pressed={overdueFilter}
+            className={
+              overdueFilter
+                ? "rounded bg-cg-red px-2 py-1 text-xs font-semibold text-white"
+                : "rounded border border-cg-n-200 px-2 py-1 text-xs text-cg-n-500 hover:text-cg-n-900"
+            }
+          >
+            Overdue only
+          </button>
+          <button
+            type="button"
+            onClick={() => setStaleFilter((v) => !v)}
+            aria-pressed={staleFilter}
+            className={
+              staleFilter
+                ? "rounded bg-cg-red px-2 py-1 text-xs font-semibold text-white"
+                : "rounded border border-cg-n-200 px-2 py-1 text-xs text-cg-n-500 hover:text-cg-n-900"
+            }
+          >
+            Stale Crit/Rush
+          </button>
         </div>
       </header>
 

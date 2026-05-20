@@ -99,19 +99,38 @@ export function matchVariant(
   size: string | null,
 ): InventoryLine | null {
   if (lookup.status !== "ok") return null;
-  const exact = lookup.lines.find(
+  // S&S can return multiple product rows with the same color+size (e.g.
+  // a Special-Exp promo SKU alongside the regular SKU). Collect all
+  // exact matches and prefer the one with the most stock — the first-
+  // match approach silently picked the empty SKU and rendered "0/Out"
+  // even when the regular SKU was fully stocked.
+  const exactMatches = lookup.lines.filter(
     (l) => norm(l.color) === norm(color) && norm(l.size) === norm(size),
   );
-  if (exact) {
-    // If we matched a 0-qty row but other variants of this productId
-    // have stock, that's suspicious — likely a vendor-side data shape
-    // we're not handling. Log it so we can compare what we matched
-    // against the rest of the response.
+  if (exactMatches.length > 0) {
+    exactMatches.sort((a, b) => b.quantityAvailable - a.quantityAvailable);
+    const exact = exactMatches[0];
+    if (exactMatches.length > 1) {
+      console.log("[match] picked best-stocked among duplicate exact matches", {
+        productId: lookup.productId,
+        askColor: color,
+        askSize: size,
+        candidates: exactMatches.map((l) => ({
+          color: l.color,
+          size: l.size,
+          qty: l.quantityAvailable,
+          warehouseCount: l.warehouses?.length ?? 0,
+        })),
+      });
+    }
+    // If even the best match is 0 but other (non-matching) variants on
+    // this productId have stock, surface that — it's likely a vendor-
+    // side data shape we're not handling.
     if (
       exact.quantityAvailable === 0 &&
       lookup.lines.some((l) => l.quantityAvailable > 0)
     ) {
-      console.log("[match] exact match has 0 qty while other variants stock", {
+      console.log("[match] best exact match has 0 qty while other variants stock", {
         productId: lookup.productId,
         askColor: color,
         askSize: size,
@@ -135,10 +154,13 @@ export function matchVariant(
     }
     return exact;
   }
-  const lenient = lookup.lines.find(
+  const lenientMatches = lookup.lines.filter(
     (l) => colorsMatch(l.color, color) && sizesMatch(l.size, size),
   );
-  if (lenient) return lenient;
+  if (lenientMatches.length > 0) {
+    lenientMatches.sort((a, b) => b.quantityAvailable - a.quantityAvailable);
+    return lenientMatches[0];
+  }
   // No match — log enough to diagnose. Reps reporting "stock should be
   // there" can paste this and we can see whether the vendor returned the
   // variant at all (matcher gap) or didn't (vendor data gap).
