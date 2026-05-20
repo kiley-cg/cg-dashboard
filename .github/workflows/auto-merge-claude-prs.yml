@@ -1,0 +1,34 @@
+name: Auto-merge Claude PRs
+
+# Enables GitHub's native auto-merge on PRs that come from `claude/*`
+# feature branches. With "Allow auto-merge" on (Settings → General),
+# the PR merges as soon as required checks pass (or immediately if no
+# checks are required). Replaces the pre-rename external automation
+# that stopped working when the default branch moved to `main`.
+#
+# Prereqs (one-time, in GitHub UI):
+#   - Settings → General → enable "Allow auto-merge"
+#   - (Optional but recommended) Settings → Branches → Add rule for
+#     `main` → require the Vercel status check to pass before merging.
+#     Without this, auto-merge will merge immediately on PR open.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  enable-automerge:
+    runs-on: ubuntu-latest
+    if: |
+      startsWith(github.event.pull_request.head.ref, 'claude/') &&
+      github.event.pull_request.draft == false
+    steps:
+      - name: Enable auto-merge
+        run: gh pr merge "$PR_URL" --auto --merge
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
