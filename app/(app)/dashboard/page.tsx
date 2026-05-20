@@ -123,13 +123,17 @@ export default async function DashboardPage() {
       const [workload, overdue, history] = await Promise.all([
         getDailyTrend({ csrId: m.csrId, status: "open", days: 30 }),
         getDailyTrend({ csrId: m.csrId, status: "open", days: 30 }),
-        getCsrDailyHistory({ csrId: m.csrId, days: 7 }),
+        // Pull a bit extra so we can drop today (partial day) and still
+        // average over a full 7 days.
+        getCsrDailyHistory({ csrId: m.csrId, days: 8 }),
       ]);
       trends.set(m.csrId, { workload, overdue });
+      const completed = history.filter((p) => p.date !== today).slice(-7);
       const avg =
-        history.length === 0
+        completed.length === 0
           ? 0
-          : history.reduce((s, p) => s + p.closedThatDay, 0) / history.length;
+          : completed.reduce((s, p) => s + p.closedThatDay, 0) /
+            completed.length;
       avgClosedByCsrId.set(m.csrId, avg);
     }),
   );

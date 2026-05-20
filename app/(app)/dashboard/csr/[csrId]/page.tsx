@@ -84,12 +84,14 @@ export default async function CsrDetailPage({ params }: Props) {
   ]);
 
   // 7-day rolling close rate for the scorecard stat (consistent with main
-  // dashboard).
-  const last7 = dailyHistory.slice(-7);
+  // dashboard). Excludes today's partial-day row so the average isn't
+  // skewed by an in-progress day.
+  const last7Completed = dailyHistory.filter((p) => p.date !== today).slice(-7);
   const avgClosedPerDay =
-    last7.length === 0
+    last7Completed.length === 0
       ? 0
-      : last7.reduce((s, p) => s + p.closedThatDay, 0) / last7.length;
+      : last7Completed.reduce((s, p) => s + p.closedThatDay, 0) /
+        last7Completed.length;
 
   // What changed this week — diff today's open rows against the snapshot
   // closest to 7 days ago.
