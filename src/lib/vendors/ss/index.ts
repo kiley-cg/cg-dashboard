@@ -266,6 +266,16 @@ function mapSSProducts(
         }))
       : [];
 
+    // S&S's aggregate `qty` field occasionally lags behind the per-
+    // warehouse breakdown (seen during Special-Exp promo transitions:
+    // qty=0 while warehouses[] still has real numbers). The per-
+    // warehouse numbers are what their UI displays as ship-from
+    // inventory, so use them as a fallback when the aggregate is 0.
+    const aggregateQty = toNum(p.qty);
+    const warehouseSum = warehouses.reduce((n, w) => n + w.quantity, 0);
+    const quantityAvailable =
+      aggregateQty > 0 ? aggregateQty : warehouseSum;
+
     // S&S bundles costs and weights into the inventory response, so
     // there's no API call to skip — but we still drop those fields
     // when the caller didn't ask for them, to keep the UI consistent
@@ -274,7 +284,7 @@ function mapSSProducts(
     return {
       color: p.colorName ?? p.color ?? null,
       size: p.sizeName ?? p.size ?? null,
-      quantityAvailable: toNum(p.qty),
+      quantityAvailable,
       yourCost: opts.includeCosts
         ? toPrice(p.yourPrice) ??
           toPrice(p.customerPrice) ??
