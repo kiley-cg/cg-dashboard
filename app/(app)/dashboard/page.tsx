@@ -6,6 +6,7 @@ import {
   getDailyTrend,
   getJobFirstSeenMap,
   getMostRecentSnapshotAt,
+  getTeamOpenJobIdsBefore,
   getTeamWorkloadBefore,
   type DailyTrendPoint,
 } from "@/lib/db/followups";
@@ -70,14 +71,17 @@ export default async function DashboardPage() {
 
   const today = todayInPacific();
   // 24 hours back, in absolute time — used to sum yesterday's open totals
-  // across the team for the day-over-day deltas on the summary strip.
+  // across the team for the day-over-day deltas, and to diff open-job
+  // sets per CSR for "Closed today".
   const yesterdayCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [bundles, mostRecent, firstSeen, yesterdayTeam] = await Promise.all([
-    getLatestSnapshotPerCsr(),
-    getMostRecentSnapshotAt(),
-    getJobFirstSeenMap(),
-    getTeamWorkloadBefore(yesterdayCutoff),
-  ]);
+  const [bundles, mostRecent, firstSeen, yesterdayTeam, yesterdayOpenJobIds] =
+    await Promise.all([
+      getLatestSnapshotPerCsr(),
+      getMostRecentSnapshotAt(),
+      getJobFirstSeenMap(),
+      getTeamWorkloadBefore(yesterdayCutoff),
+      getTeamOpenJobIdsBefore(yesterdayCutoff),
+    ]);
 
   if (bundles.length === 0) {
     return <EmptyState />;
@@ -101,6 +105,7 @@ export default async function DashboardPage() {
       csrName,
       open: bundle.open,
       completed: bundle.completed,
+      prevOpenJobIds: yesterdayOpenJobIds.get(csrId),
       opts: { todayPacific: today, jobFirstSeen: firstSeen },
     });
   });

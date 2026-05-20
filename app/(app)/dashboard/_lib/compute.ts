@@ -115,10 +115,12 @@ export function deriveCsrMetrics(args: {
   csrName: string;
   open: SnapshotBundle | undefined;
   completed: SnapshotBundle | undefined;
-  prevOpen?: SnapshotBundle | undefined;
+  // Job IDs from the most recent open snapshot taken before ~24h ago.
+  // "Closed today" = jobs that were in that set but aren't in `open` now.
+  prevOpenJobIds?: Set<number> | undefined;
   opts: ComputeOpts;
 }): CsrMetrics {
-  const { csrId, csrName, open, completed, prevOpen, opts } = args;
+  const { csrId, csrName, open, completed, prevOpenJobIds, opts } = args;
   const now = opts.now ?? new Date();
   const today = opts.todayPacific;
 
@@ -155,14 +157,16 @@ export function deriveCsrMetrics(args: {
     else buckets.gt7++;
   }
 
-  // "Closed today" — preferred: completed snapshot's totalRecords today.
-  // Fallback: diff vs previous open snapshot.
+  // "Closed today" = open jobs from ~24h ago that are no longer on today's
+  // open list. The Syncore "completed" view is cumulative (years of
+  // history, totalRecords in the thousands), so we can't use it — the
+  // disappear-from-open-list diff is the reliable signal.
   let closedToday = 0;
-  if (completed) {
-    closedToday = completed.snapshot.totalRecords;
-  } else if (prevOpen && open) {
+  if (prevOpenJobIds && open) {
     const currentJobIds = new Set(open.rows.map((r) => r.jobId));
-    closedToday = prevOpen.rows.filter((r) => !currentJobIds.has(r.jobId)).length;
+    for (const id of prevOpenJobIds) {
+      if (!currentJobIds.has(id)) closedToday++;
+    }
   }
 
   const issueCounts: IssueCounts =
@@ -332,10 +336,10 @@ export function generateTalkingPoints(args: {
   }
 
   // 5. Heavy workload overall
-  if (m.workload > 30 && bullets.length < 4) {
+  if (m.workload > 45 && bullets.length < 4) {
     bullets.push({
       tone: "concern",
-      text: `${m.workload} open follow-ups — consider triaging the oldest down to ≤25`,
+      text: `${m.workload} open follow-ups — consider triaging the oldest down to ≤40`,
     });
   }
 
@@ -433,7 +437,7 @@ export interface TeamMetrics {
   ranks: Map<number, number>;
 }
 
-const HEAVY_WORKLOAD_THRESHOLD = 30;
+const HEAVY_WORKLOAD_THRESHOLD = 45;
 
 function mean(values: number[]): number {
   if (values.length === 0) return 0;

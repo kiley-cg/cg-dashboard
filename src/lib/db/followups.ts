@@ -313,6 +313,44 @@ export async function getTeamWorkloadBefore(
 }
 
 /**
+ * Job IDs from the most recent open snapshot per CSR taken before `before`.
+ * One query for the whole team. Used to compute "closed today" as the
+ * set difference between yesterday's open list and today's.
+ */
+export async function getTeamOpenJobIdsBefore(
+  before: Date,
+): Promise<Map<number, Set<number>>> {
+  const rows = await db.execute<{ csr_id: number | string; job_id: number | string }>(sql`
+    WITH latest AS (
+      SELECT DISTINCT ON (csr_id) id, csr_id
+      FROM followup_snapshots
+      WHERE follow_up_status = 'open'
+        AND snapshot_at < ${before.toISOString()}
+      ORDER BY csr_id, snapshot_at DESC
+    )
+    SELECT latest.csr_id AS csr_id, r.job_id AS job_id
+    FROM followup_rows r
+    JOIN latest ON r.snapshot_id = latest.id
+  `);
+  const arr = Array.from(
+    rows as Iterable<{ csr_id: number | string; job_id: number | string }>,
+  );
+  const map = new Map<number, Set<number>>();
+  for (const r of arr) {
+    const csrId = Number(r.csr_id);
+    const jobId = Number(r.job_id);
+    if (!Number.isFinite(csrId) || !Number.isFinite(jobId)) continue;
+    let set = map.get(csrId);
+    if (!set) {
+      set = new Set();
+      map.set(csrId, set);
+    }
+    set.add(jobId);
+  }
+  return map;
+}
+
+/**
  * Open rows in the most recent open snapshot for the given CSR taken before
  * `before`. Used by the CSR drill-down page to surface jobs added/closed
  * since N days ago.
