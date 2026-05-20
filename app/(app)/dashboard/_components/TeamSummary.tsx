@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { TeamMetrics } from "../_lib/compute";
+import { LinkSpinner } from "./LinkSpinner";
 
 interface Props {
   team: TeamMetrics;
@@ -103,7 +104,10 @@ function Tile({
         <div className="mt-0.5 text-[11px] text-cg-n-500">{sub}</div>
       )}
       {href && (
-        <div className="mt-1 text-[10px] text-cg-info">View jobs ↓</div>
+        <div className="mt-1 text-[10px] text-cg-info flex items-center gap-1.5">
+          <span>View jobs ↓</span>
+          <LinkSpinner size={10} />
+        </div>
       )}
     </>
   );

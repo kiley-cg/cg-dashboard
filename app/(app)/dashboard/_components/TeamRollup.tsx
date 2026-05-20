@@ -3,6 +3,7 @@ import type { CsrMetrics } from "../_lib/compute";
 import type { DailyTrendPoint } from "@/lib/db/followups";
 import { ISSUE_KINDS } from "@/lib/syncore/followups";
 import { ISSUE_LABEL } from "./IssueBadge";
+import { LinkSpinner } from "./LinkSpinner";
 import { Sparkline } from "./Sparkline";
 
 interface Props {
@@ -73,10 +74,11 @@ export function TeamRollup({ metrics, trends }: Props) {
                       {href ? (
                         <Link
                           href={href}
-                          className="block rounded-md py-1.5 text-xs font-bold tabular-nums hover:ring-2 hover:ring-cg-red-300 transition"
+                          className="flex items-center justify-center gap-1 rounded-md py-1.5 text-xs font-bold tabular-nums hover:ring-2 hover:ring-cg-red-300 transition"
                           style={cellStyle}
                         >
-                          {n}
+                          <span>{n}</span>
+                          <LinkSpinner size={8} />
                         </Link>
                       ) : (
                         <div

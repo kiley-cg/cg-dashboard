@@ -5,6 +5,7 @@ import {
   type PriorityReason,
 } from "../_lib/compute";
 import { IssueBadge, issueKindFromLabel } from "./IssueBadge";
+import { LinkSpinner } from "./LinkSpinner";
 
 const SYNCORE_DEEP_LINK = "https://www.ateasesystems.net/Job/Details";
 
@@ -75,9 +76,10 @@ export function PriorityQueue({ items }: { items: PriorityItem[] }) {
                   <td className="px-3 py-2 whitespace-nowrap">
                     <Link
                       href={`/dashboard/csr/${item.csrId}`}
-                      className="inline-flex rounded-chip bg-cg-n-100 px-2 py-0.5 text-xs font-semibold text-cg-n-800 hover:bg-cg-n-200"
+                      className="inline-flex items-center gap-1.5 rounded-chip bg-cg-n-100 px-2 py-0.5 text-xs font-semibold text-cg-n-800 hover:bg-cg-n-200"
                     >
                       {item.csrName}
+                      <LinkSpinner size={10} />
                     </Link>
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">

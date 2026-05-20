@@ -7,6 +7,7 @@ import {
 } from "../_lib/compute";
 import { ISSUE_LABEL } from "./IssueBadge";
 import { ISSUE_KINDS, type IssueKind } from "@/lib/syncore/followups";
+import { LinkSpinner } from "./LinkSpinner";
 import { Sparkline } from "./Sparkline";
 
 // Tailwind needs full class names in source for the JIT to keep them. Mirror
@@ -145,10 +146,13 @@ export function CsrScorecard({
         <div className="min-w-0">
           <Link
             href={`/dashboard/csr/${m.csrId}`}
-            className="text-lg font-extrabold tracking-tight text-cg-n-900 hover:text-cg-red"
+            className="inline-flex items-center gap-1.5 text-lg font-extrabold tracking-tight text-cg-n-900 hover:text-cg-red"
           >
             {m.csrName}
-            <span className="ml-1 text-xs font-normal text-cg-n-400">›</span>
+            <span className="text-xs font-normal text-cg-n-400">›</span>
+            <span className="text-cg-red">
+              <LinkSpinner size={12} />
+            </span>
           </Link>
           {team && rank !== undefined && (
             <div className="text-[10px] uppercase tracking-wide text-cg-n-500 mt-0.5">
