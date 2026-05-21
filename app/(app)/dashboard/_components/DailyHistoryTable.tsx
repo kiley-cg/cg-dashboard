@@ -5,7 +5,7 @@ interface Props {
 }
 
 function formatDate(d: string): string {
-  // d is YYYY-MM-DD from Postgres; parse without TZ to avoid date-shift.
+  // d is YYYY-MM-DD (Pacific binning); parse without TZ to avoid date-shift.
   const [y, m, day] = d.split("-").map(Number);
   if (!y || !m || !day) return d;
   const dt = new Date(Date.UTC(y, m - 1, day));
@@ -15,6 +15,21 @@ function formatDate(d: string): string {
     month: "short",
     day: "numeric",
   }).format(dt);
+}
+
+function formatSnapshotTime(d: Date | null): string {
+  if (!d) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(d);
+}
+
+function todayInPacific(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+  }).format(new Date());
 }
 
 function rollingAvg(history: DailyHistoryPoint[], index: number, windowDays: number): number {
@@ -38,12 +53,18 @@ export function DailyHistoryTable({ history }: Props) {
     );
   }
 
+  const today = todayInPacific();
   // Newest day on top.
   const rows = [...history.entries()].reverse();
 
+  // Averages exclude today's partial-day row to avoid skewing the rolling
+  // close rate when the day isn't actually over yet.
+  const completed = history.filter((p) => p.date !== today);
   const overallAvg =
-    history.reduce((s, p) => s + p.closedThatDay, 0) / history.length;
-  const last7 = history.slice(-7);
+    completed.length === 0
+      ? 0
+      : completed.reduce((s, p) => s + p.closedThatDay, 0) / completed.length;
+  const last7 = completed.slice(-7);
   const last7Avg =
     last7.length === 0
       ? 0
@@ -59,7 +80,7 @@ export function DailyHistoryTable({ history }: Props) {
           <span className="font-semibold text-cg-n-800">
             {overallAvg.toFixed(1)}
           </span>{" "}
-          closed/day avg over {history.length}d ·{" "}
+          closed/day avg over {completed.length}d ·{" "}
           <span className="font-semibold text-cg-n-800">
             {last7Avg.toFixed(1)}
           </span>{" "}
@@ -71,31 +92,51 @@ export function DailyHistoryTable({ history }: Props) {
           <thead className="bg-cg-n-50">
             <tr className="text-left text-xs uppercase tracking-wide text-cg-n-500">
               <th className="px-3 py-2">Date</th>
-              <th className="px-3 py-2 text-right">Open EOD</th>
+              <th className="px-3 py-2 text-right">Open at EOD</th>
               <th className="px-3 py-2 text-right">Closed</th>
               <th className="px-3 py-2 text-right">7-day avg closed</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(([idx, point]) => (
-              <tr
-                key={point.date}
-                className="border-t border-cg-n-100 hover:bg-cg-n-50"
-              >
-                <td className="px-3 py-2 whitespace-nowrap text-cg-n-700">
-                  {formatDate(point.date)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-cg-n-900 font-semibold">
-                  {point.openAtEod}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-cg-success font-semibold">
-                  {point.closedThatDay > 0 ? point.closedThatDay : "—"}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-cg-n-600">
-                  {rollingAvg(history, idx, 7).toFixed(1)}
-                </td>
-              </tr>
-            ))}
+            {rows.map(([idx, point]) => {
+              const isToday = point.date === today;
+              const snapshotLabel = formatSnapshotTime(point.snapshotAt);
+              return (
+                <tr
+                  key={point.date}
+                  className="border-t border-cg-n-100 hover:bg-cg-n-50"
+                >
+                  <td className="px-3 py-2 whitespace-nowrap text-cg-n-700">
+                    <div className="flex items-center gap-2">
+                      <span>{formatDate(point.date)}</span>
+                      {isToday && (
+                        <span className="rounded-chip bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-cg-warning">
+                          in progress
+                        </span>
+                      )}
+                    </div>
+                    {snapshotLabel && (
+                      <div className="text-[10px] text-cg-n-400">
+                        as of {snapshotLabel} PT
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-cg-n-900 font-semibold">
+                    {point.openAtEod}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-cg-success font-semibold">
+                    {isToday
+                      ? "—"
+                      : point.closedThatDay > 0
+                        ? point.closedThatDay
+                        : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-cg-n-600">
+                    {isToday ? "—" : rollingAvg(history, idx, 7).toFixed(1)}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

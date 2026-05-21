@@ -269,17 +269,30 @@ export async function getClosedSinceLastSnapshot(opts: {
 }
 
 export interface DailyHistoryPoint {
-  date: string; // YYYY-MM-DD
-  openAtEod: number; // open follow-ups at end of day
+  date: string; // YYYY-MM-DD (Pacific)
+  openAtEod: number; // open follow-ups at end of day, counted from rows
   closedThatDay: number; // jobs in prior day's open list but not this day's
+  snapshotAt: Date | null; // when the EOD snapshot was actually taken
 }
 
 /**
  * Per-day open count + closed-count for a CSR, for the last N days.
- * "Closed that day" is computed by diffing job IDs across the EOD open
- * snapshots — same approach as the "Closed today" team tile. Returns N
- * entries (we fetch N+1 days of snapshots internally so day 1 has a
- * comparison baseline).
+ *
+ * Binning: by Pacific (America/Los_Angeles) day, so "EOD May 19" is the
+ * last snapshot taken during Pacific May 19 — what the reps experience
+ * as their workday. UTC binning shifted evening snapshots into the
+ * wrong day (e.g. 11pm PDT May 20 = 06:00 UTC May 21 was being shown as
+ * May 21 EOD).
+ *
+ * Counts: from the actual rows in followup_rows joined to the EOD
+ * snapshot, not the snapshot's reported totalRecords. The two should
+ * agree, but the row count is the source of truth — same data backing
+ * the closed-day diff, so the two columns stay consistent. (The
+ * dashboard's "Closed today" tile had a similar bug recently from
+ * trusting a reported total over the row data.)
+ *
+ * Returns N entries (we fetch N+1 days of snapshots internally so day
+ * 1 has a comparison baseline).
  */
 export async function getCsrDailyHistory(opts: {
   csrId: number;
@@ -291,21 +304,26 @@ export async function getCsrDailyHistory(opts: {
 
   const rows = await db.execute<{
     day: string;
-    total_records: number | string;
+    snapshot_at: string | Date;
     job_id: number | string | null;
   }>(sql`
     WITH eod AS (
-      SELECT DISTINCT ON (date_trunc('day', snapshot_at))
+      SELECT DISTINCT ON (date_trunc('day', snapshot_at AT TIME ZONE 'America/Los_Angeles'))
         id AS snapshot_id,
-        to_char(date_trunc('day', snapshot_at), 'YYYY-MM-DD') AS day,
-        total_records
+        to_char(
+          date_trunc('day', snapshot_at AT TIME ZONE 'America/Los_Angeles'),
+          'YYYY-MM-DD'
+        ) AS day,
+        snapshot_at
       FROM followup_snapshots
       WHERE csr_id = ${opts.csrId}
         AND follow_up_status = 'open'
         AND snapshot_at >= ${since.toISOString()}
-      ORDER BY date_trunc('day', snapshot_at) DESC, snapshot_at DESC
+      ORDER BY
+        date_trunc('day', snapshot_at AT TIME ZONE 'America/Los_Angeles') DESC,
+        snapshot_at DESC
     )
-    SELECT eod.day, eod.total_records, r.job_id
+    SELECT eod.day, eod.snapshot_at, r.job_id
     FROM eod
     LEFT JOIN followup_rows r ON r.snapshot_id = eod.snapshot_id
     ORDER BY eod.day ASC
@@ -314,18 +332,19 @@ export async function getCsrDailyHistory(opts: {
   const arr = Array.from(
     rows as Iterable<{
       day: string;
-      total_records: number | string;
+      snapshot_at: string | Date;
       job_id: number | string | null;
     }>,
   );
 
-  // Group rows by day.
-  type DayBucket = { totalRecords: number; jobIds: Set<number> };
+  // Group rows by day. Count is taken from the joined rows, not from
+  // the snapshot's reported total_records.
+  type DayBucket = { snapshotAt: Date | null; jobIds: Set<number> };
   const byDay = new Map<string, DayBucket>();
   for (const row of arr) {
     let entry = byDay.get(row.day);
     if (!entry) {
-      entry = { totalRecords: Number(row.total_records), jobIds: new Set() };
+      entry = { snapshotAt: asDate(row.snapshot_at), jobIds: new Set() };
       byDay.set(row.day, entry);
     }
     if (row.job_id != null) {
@@ -346,8 +365,9 @@ export async function getCsrDailyHistory(opts: {
     }
     result.push({
       date: dayKeys[i],
-      openAtEod: today.totalRecords,
+      openAtEod: today.jobIds.size,
       closedThatDay: closed,
+      snapshotAt: today.snapshotAt,
     });
   }
   return result;
