@@ -270,28 +270,45 @@ export async function getClosedSinceLastSnapshot(opts: {
 
 export interface DailyHistoryPoint {
   date: string; // YYYY-MM-DD (Pacific)
-  unfinishedAtEod: number; // open AND fuDate <= that day (or null) — items the rep should have handled by EOD but didn't
-  closedThatDay: number; // jobs in prior day's open list but not this day's (regardless of fuDate)
-  snapshotAt: Date | null; // when the EOD snapshot was actually taken
+  // Beginning FU = follow-ups due today or overdue, still open at the
+  // morning snapshot. The rep's actual workload to clear today.
+  bodCount: number;
+  // EOD FU = follow-ups due today or overdue, still open at the evening
+  // snapshot. The ones she didn't get to.
+  eodCount: number;
+  // Of the BOD due/overdue set, how many were no longer in the EOD due
+  // set — i.e. handled, completed, re-dated to the future, etc. The
+  // rep's actual productivity for the day.
+  closedThatDay: number;
+  bodSnapshotAt: Date | null;
+  eodSnapshotAt: Date | null;
+  // True only when we have two distinct snapshots (morning AND evening).
+  // False on days with only one snapshot, in which case closedThatDay is
+  // 0 and should be rendered as "—".
+  hasFullDayWindow: boolean;
 }
 
 /**
- * Per-day "unfinished at EOD" + "closed that day" for a CSR, last N days.
+ * Per-day Beginning/EOD/Closed for a CSR, last N days. Pulls the first
+ * AND last snapshot of each Pacific day so we can measure within-day
+ * movement.
  *
- * "Unfinished at EOD" filters open rows to fuDate <= that day (or null),
- * so the number reflects what the rep was supposed to finish by EOD and
- * hadn't — Syncore's open list also contains future-dated items, which
- * inflate any "total open" count and don't represent today's pending
- * work.
+ * All counts filter open rows to `fuDate <= that day` (excluding null
+ * fuDates as "parked, not actively due"), so the numbers reflect items
+ * the rep was supposed to handle that day rather than the total queue
+ * (which is inflated by future-dated follow-ups).
  *
- * "Closed that day" is the unfiltered diff: jobs in yesterday's EOD
- * open list that aren't in today's. Captures everything the rep moved
- * off their queue during the day, including the occasional future-dated
- * item they handle early.
+ * "Closed that day" = jobs in the BOD due set that aren't in the EOD
+ * due set. Captures completions and re-dating to the future. Note this
+ * is per-day within-day movement, distinct from the team-level "Closed
+ * today" tile which diffs across calendar days.
  *
- * Binning: by Pacific day. Counts derived from joined followup_rows
- * (not Syncore's reported totalRecords). Returns N entries; we fetch
- * N+1 days internally so day 1 has a comparison baseline.
+ * Days that only have one snapshot (historical pre-EOD-cron data, or
+ * weekends) get `hasFullDayWindow: false` and closedThatDay: 0.
+ *
+ * Returns N entries; we fetch N+1 days internally to keep the array
+ * symmetric with the previous version, though the diff is now within-
+ * day rather than cross-day.
  */
 export async function getCsrDailyHistory(opts: {
   csrId: number;
@@ -304,88 +321,117 @@ export async function getCsrDailyHistory(opts: {
   const rows = await db.execute<{
     day: string;
     snapshot_at: string | Date;
+    is_bod: boolean;
+    is_eod: boolean;
     job_id: number | string | null;
     fu_date: string | null;
   }>(sql`
-    WITH eod AS (
-      SELECT DISTINCT ON (date_trunc('day', snapshot_at AT TIME ZONE 'America/Los_Angeles'))
+    WITH ranked AS (
+      SELECT
         id AS snapshot_id,
+        snapshot_at,
         to_char(
           date_trunc('day', snapshot_at AT TIME ZONE 'America/Los_Angeles'),
           'YYYY-MM-DD'
         ) AS day,
-        snapshot_at
+        ROW_NUMBER() OVER (
+          PARTITION BY date_trunc('day', snapshot_at AT TIME ZONE 'America/Los_Angeles')
+          ORDER BY snapshot_at ASC
+        ) AS rn_asc,
+        ROW_NUMBER() OVER (
+          PARTITION BY date_trunc('day', snapshot_at AT TIME ZONE 'America/Los_Angeles')
+          ORDER BY snapshot_at DESC
+        ) AS rn_desc
       FROM followup_snapshots
       WHERE csr_id = ${opts.csrId}
         AND follow_up_status = 'open'
         AND snapshot_at >= ${since.toISOString()}
-      ORDER BY
-        date_trunc('day', snapshot_at AT TIME ZONE 'America/Los_Angeles') DESC,
-        snapshot_at DESC
     )
-    SELECT eod.day, eod.snapshot_at, r.job_id, r.fu_date
-    FROM eod
-    LEFT JOIN followup_rows r ON r.snapshot_id = eod.snapshot_id
-    ORDER BY eod.day ASC
+    SELECT
+      ranked.day,
+      ranked.snapshot_at,
+      (ranked.rn_asc = 1) AS is_bod,
+      (ranked.rn_desc = 1) AS is_eod,
+      r.job_id,
+      r.fu_date
+    FROM ranked
+    LEFT JOIN followup_rows r ON r.snapshot_id = ranked.snapshot_id
+    WHERE ranked.rn_asc = 1 OR ranked.rn_desc = 1
+    ORDER BY ranked.day ASC, ranked.snapshot_at ASC
   `);
 
   const arr = Array.from(
     rows as Iterable<{
       day: string;
       snapshot_at: string | Date;
+      is_bod: boolean;
+      is_eod: boolean;
       job_id: number | string | null;
       fu_date: string | null;
     }>,
   );
 
-  // Group rows by day. Track two sets per day:
-  //   - allJobIds: every open row, used for the closed-day diff
-  //   - dueJobIds: rows with fuDate <= day (or null), used for "unfinished"
+  // Per day, track BOD and EOD due-job sets separately. When only one
+  // snapshot exists for the day, both flags are true on the same row →
+  // bodDue and eodDue end up identical.
   type DayBucket = {
-    snapshotAt: Date | null;
-    allJobIds: Set<number>;
-    dueJobIds: Set<number>;
+    bodSnapshotAt: Date | null;
+    eodSnapshotAt: Date | null;
+    bodDue: Set<number>;
+    eodDue: Set<number>;
   };
   const byDay = new Map<string, DayBucket>();
   for (const row of arr) {
     let entry = byDay.get(row.day);
     if (!entry) {
       entry = {
-        snapshotAt: asDate(row.snapshot_at),
-        allJobIds: new Set(),
-        dueJobIds: new Set(),
+        bodSnapshotAt: null,
+        eodSnapshotAt: null,
+        bodDue: new Set(),
+        eodDue: new Set(),
       };
       byDay.set(row.day, entry);
     }
-    if (row.job_id != null) {
-      const id = Number(row.job_id);
-      if (!Number.isFinite(id)) continue;
-      entry.allJobIds.add(id);
-      // Only count toward "unfinished" if there's an explicit fuDate that
-      // is today or earlier. Follow-ups with no scheduled fuDate are
-      // treated as parked-on-queue, not actively due — they don't inflate
-      // the EOD unfinished count even though they sit on the open list.
-      // String comparison works for YYYY-MM-DD format.
-      const fu = row.fu_date?.trim() || null;
-      if (fu && fu <= row.day) entry.dueJobIds.add(id);
-    }
+    const snapAt = asDate(row.snapshot_at);
+    if (row.is_bod && !entry.bodSnapshotAt) entry.bodSnapshotAt = snapAt;
+    if (row.is_eod && !entry.eodSnapshotAt) entry.eodSnapshotAt = snapAt;
+
+    if (row.job_id == null) continue;
+    const id = Number(row.job_id);
+    if (!Number.isFinite(id)) continue;
+    // Only count toward due if there's an explicit fuDate that's today
+    // or earlier. Null fuDate = parked, not actively due.
+    const fu = row.fu_date?.trim() || null;
+    const isDue = !!fu && fu <= row.day;
+    if (!isDue) continue;
+    if (row.is_bod) entry.bodDue.add(id);
+    if (row.is_eod) entry.eodDue.add(id);
   }
 
-  // Build the result: for each day after the first, diff against prior day.
   const dayKeys = [...byDay.keys()].sort();
+  // Skip the first day (kept for symmetry / future cross-day measurements
+  // — same as before).
   const result: DailyHistoryPoint[] = [];
   for (let i = 1; i < dayKeys.length; i++) {
-    const today = byDay.get(dayKeys[i])!;
-    const yesterday = byDay.get(dayKeys[i - 1])!;
+    const day = byDay.get(dayKeys[i])!;
+    const hasFullDayWindow =
+      day.bodSnapshotAt != null &&
+      day.eodSnapshotAt != null &&
+      day.bodSnapshotAt.getTime() !== day.eodSnapshotAt.getTime();
     let closed = 0;
-    for (const id of yesterday.allJobIds) {
-      if (!today.allJobIds.has(id)) closed++;
+    if (hasFullDayWindow) {
+      for (const id of day.bodDue) {
+        if (!day.eodDue.has(id)) closed++;
+      }
     }
     result.push({
       date: dayKeys[i],
-      unfinishedAtEod: today.dueJobIds.size,
+      bodCount: day.bodDue.size,
+      eodCount: day.eodDue.size,
       closedThatDay: closed,
-      snapshotAt: today.snapshotAt,
+      bodSnapshotAt: day.bodSnapshotAt,
+      eodSnapshotAt: day.eodSnapshotAt,
+      hasFullDayWindow,
     });
   }
   return result;
