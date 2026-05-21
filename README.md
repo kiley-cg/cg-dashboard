@@ -31,7 +31,7 @@ routes layer an additional `MANAGER_EMAILS` allowlist on top.
 - `soap` (vpulim/node-soap) for SanMar PromoStandards
 - Resend for transactional email (digest only)
 - Vercel Cron for scheduled jobs
-- Deployed on Vercel
+- Deployed on Vercel (production branch: `main`)
 
 ## First-time setup
 
