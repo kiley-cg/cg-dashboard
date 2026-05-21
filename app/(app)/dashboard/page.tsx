@@ -24,6 +24,7 @@ import {
   type OldestJob,
   type TalkingPoint,
 } from "./_lib/compute";
+import Link from "next/link";
 import { CsrScorecard } from "./_components/CsrScorecard";
 import { TeamRollup } from "./_components/TeamRollup";
 import { JobsTable } from "./_components/JobsTable";
@@ -205,6 +206,12 @@ export default async function DashboardPage() {
             )}
           </p>
         </div>
+        <Link
+          href="/help/dashboard"
+          className="text-cg-info hover:underline text-sm"
+        >
+          Help &amp; FAQ →
+        </Link>
       </header>
 
       <TeamSummary
