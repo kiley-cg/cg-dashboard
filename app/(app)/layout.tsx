@@ -31,12 +31,6 @@ export default async function AppLayout({
                 Dashboard
               </Link>
             )}
-            <Link
-              href="/help"
-              className="text-cg-n-300 hover:text-white transition"
-            >
-              Help
-            </Link>
             {session?.user?.email && (
               <span className="text-cg-n-300">{session.user.email}</span>
             )}
