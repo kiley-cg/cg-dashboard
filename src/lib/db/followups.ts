@@ -361,11 +361,13 @@ export async function getCsrDailyHistory(opts: {
       const id = Number(row.job_id);
       if (!Number.isFinite(id)) continue;
       entry.allJobIds.add(id);
-      // Treat null/empty fuDate as "due now" — those are items the rep
-      // needs to act on without a scheduled follow-up date. String
-      // comparison works for YYYY-MM-DD format.
+      // Only count toward "unfinished" if there's an explicit fuDate that
+      // is today or earlier. Follow-ups with no scheduled fuDate are
+      // treated as parked-on-queue, not actively due — they don't inflate
+      // the EOD unfinished count even though they sit on the open list.
+      // String comparison works for YYYY-MM-DD format.
       const fu = row.fu_date?.trim() || null;
-      if (!fu || fu <= row.day) entry.dueJobIds.add(id);
+      if (fu && fu <= row.day) entry.dueJobIds.add(id);
     }
   }
 
