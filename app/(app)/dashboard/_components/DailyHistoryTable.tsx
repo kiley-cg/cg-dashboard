@@ -73,10 +73,17 @@ export function DailyHistoryTable({ history }: Props) {
   return (
     <section className="rounded-card border border-cg-n-200 bg-white shadow-sm">
       <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-cg-n-100 p-4">
-        <h3 className="text-lg font-extrabold tracking-tight text-cg-n-900">
-          Daily follow-up history
-        </h3>
-        <div className="text-xs text-cg-n-500 tabular-nums">
+        <div>
+          <h3 className="text-lg font-extrabold tracking-tight text-cg-n-900">
+            Daily follow-up history
+          </h3>
+          <p className="text-[11px] text-cg-n-500 mt-0.5">
+            <span className="font-semibold">Unfinished at EOD</span> = follow-ups
+            due that day or overdue, still open. Typically near zero on a
+            productive day.
+          </p>
+        </div>
+        <div className="text-xs text-cg-n-500 tabular-nums whitespace-nowrap">
           <span className="font-semibold text-cg-n-800">
             {overallAvg.toFixed(1)}
           </span>{" "}
@@ -92,7 +99,12 @@ export function DailyHistoryTable({ history }: Props) {
           <thead className="bg-cg-n-50">
             <tr className="text-left text-xs uppercase tracking-wide text-cg-n-500">
               <th className="px-3 py-2">Date</th>
-              <th className="px-3 py-2 text-right">Open at EOD</th>
+              <th
+                className="px-3 py-2 text-right"
+                title="Follow-ups still open at EOD whose fuDate was that day or earlier — work the rep should have handled but didn't."
+              >
+                Unfinished at EOD
+              </th>
               <th className="px-3 py-2 text-right">Closed</th>
               <th className="px-3 py-2 text-right">7-day avg closed</th>
             </tr>
@@ -121,8 +133,16 @@ export function DailyHistoryTable({ history }: Props) {
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-cg-n-900 font-semibold">
-                    {point.openAtEod}
+                  <td
+                    className={`px-3 py-2 text-right tabular-nums font-semibold ${
+                      point.unfinishedAtEod === 0
+                        ? "text-cg-success"
+                        : point.unfinishedAtEod <= 3
+                          ? "text-cg-n-700"
+                          : "text-cg-danger"
+                    }`}
+                  >
+                    {point.unfinishedAtEod}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-cg-success font-semibold">
                     {isToday
