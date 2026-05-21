@@ -32,11 +32,17 @@ function todayInPacific(): string {
   }).format(new Date());
 }
 
-function rollingAvg(history: DailyHistoryPoint[], index: number, windowDays: number): number {
+function rollingAvg(
+  history: DailyHistoryPoint[],
+  index: number,
+  windowDays: number,
+): number {
   const start = Math.max(0, index - windowDays + 1);
   const slice = history.slice(start, index + 1);
-  if (slice.length === 0) return 0;
-  return slice.reduce((s, p) => s + p.closedThatDay, 0) / slice.length;
+  // Only average days where we actually have a within-day window.
+  const measured = slice.filter((p) => p.hasFullDayWindow);
+  if (measured.length === 0) return 0;
+  return measured.reduce((s, p) => s + p.closedThatDay, 0) / measured.length;
 }
 
 export function DailyHistoryTable({ history }: Props) {
@@ -57,14 +63,15 @@ export function DailyHistoryTable({ history }: Props) {
   // Newest day on top.
   const rows = [...history.entries()].reverse();
 
-  // Averages exclude today's partial-day row to avoid skewing the rolling
-  // close rate when the day isn't actually over yet.
-  const completed = history.filter((p) => p.date !== today);
+  // Averages over completed days that had a full within-day window.
+  const measured = history.filter(
+    (p) => p.hasFullDayWindow && p.date !== today,
+  );
   const overallAvg =
-    completed.length === 0
+    measured.length === 0
       ? 0
-      : completed.reduce((s, p) => s + p.closedThatDay, 0) / completed.length;
-  const last7 = completed.slice(-7);
+      : measured.reduce((s, p) => s + p.closedThatDay, 0) / measured.length;
+  const last7 = measured.slice(-7);
   const last7Avg =
     last7.length === 0
       ? 0
@@ -78,16 +85,18 @@ export function DailyHistoryTable({ history }: Props) {
             Daily follow-up history
           </h3>
           <p className="text-[11px] text-cg-n-500 mt-0.5">
-            <span className="font-semibold">Unfinished at EOD</span> = follow-ups
-            due that day or overdue, still open. Typically near zero on a
-            productive day.
+            Counts are follow-ups due that day or overdue (not future-dated).{" "}
+            <span className="font-semibold">Beginning FU</span> at the AM
+            snapshot, <span className="font-semibold">EOD FU</span> at the PM
+            snapshot, <span className="font-semibold">Closed</span> = items
+            cleared from the due set during the day.
           </p>
         </div>
         <div className="text-xs text-cg-n-500 tabular-nums whitespace-nowrap">
           <span className="font-semibold text-cg-n-800">
             {overallAvg.toFixed(1)}
           </span>{" "}
-          closed/day avg over {completed.length}d ·{" "}
+          closed/day avg over {measured.length}d ·{" "}
           <span className="font-semibold text-cg-n-800">
             {last7Avg.toFixed(1)}
           </span>{" "}
@@ -99,20 +108,29 @@ export function DailyHistoryTable({ history }: Props) {
           <thead className="bg-cg-n-50">
             <tr className="text-left text-xs uppercase tracking-wide text-cg-n-500">
               <th className="px-3 py-2">Date</th>
-              <th
-                className="px-3 py-2 text-right"
-                title="Follow-ups still open at EOD whose fuDate was that day or earlier — work the rep should have handled but didn't."
-              >
-                Unfinished at EOD
+              <th className="px-3 py-2 text-right" title="Due or overdue at the AM snapshot — the rep's workload to clear that day.">
+                Beginning FU
               </th>
-              <th className="px-3 py-2 text-right">Closed</th>
+              <th className="px-3 py-2 text-right" title="Due or overdue still open at the PM snapshot — what the rep didn't get to.">
+                EOD FU
+              </th>
+              <th className="px-3 py-2 text-right" title="Items in the BOD due set that aren't in the EOD due set — what the rep cleared.">
+                Closed
+              </th>
               <th className="px-3 py-2 text-right">7-day avg closed</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(([idx, point]) => {
               const isToday = point.date === today;
-              const snapshotLabel = formatSnapshotTime(point.snapshotAt);
+              const bodLabel = formatSnapshotTime(point.bodSnapshotAt);
+              const eodLabel = formatSnapshotTime(point.eodSnapshotAt);
+              const eodColor =
+                point.eodCount === 0
+                  ? "text-cg-success"
+                  : point.eodCount <= 3
+                    ? "text-cg-n-700"
+                    : "text-cg-danger";
               return (
                 <tr
                   key={point.date}
@@ -127,32 +145,33 @@ export function DailyHistoryTable({ history }: Props) {
                         </span>
                       )}
                     </div>
-                    {snapshotLabel && (
-                      <div className="text-[10px] text-cg-n-400">
-                        as of {snapshotLabel} PT
-                      </div>
-                    )}
+                    <div className="text-[10px] text-cg-n-400">
+                      {bodLabel && eodLabel && bodLabel !== eodLabel
+                        ? `BOD ${bodLabel} · EOD ${eodLabel} PT`
+                        : bodLabel || eodLabel
+                          ? `as of ${eodLabel || bodLabel} PT`
+                          : ""}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums font-semibold text-cg-n-800">
+                    {point.bodCount}
                   </td>
                   <td
-                    className={`px-3 py-2 text-right tabular-nums font-semibold ${
-                      point.unfinishedAtEod === 0
-                        ? "text-cg-success"
-                        : point.unfinishedAtEod <= 3
-                          ? "text-cg-n-700"
-                          : "text-cg-danger"
-                    }`}
+                    className={`px-3 py-2 text-right tabular-nums font-semibold ${eodColor}`}
                   >
-                    {point.unfinishedAtEod}
+                    {point.eodCount}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-cg-success font-semibold">
-                    {isToday
+                    {!point.hasFullDayWindow
                       ? "—"
                       : point.closedThatDay > 0
                         ? point.closedThatDay
-                        : "—"}
+                        : "0"}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-cg-n-600">
-                    {isToday ? "—" : rollingAvg(history, idx, 7).toFixed(1)}
+                    {!point.hasFullDayWindow
+                      ? "—"
+                      : rollingAvg(history, idx, 7).toFixed(1)}
                   </td>
                 </tr>
               );
