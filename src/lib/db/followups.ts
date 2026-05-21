@@ -270,29 +270,28 @@ export async function getClosedSinceLastSnapshot(opts: {
 
 export interface DailyHistoryPoint {
   date: string; // YYYY-MM-DD (Pacific)
-  openAtEod: number; // open follow-ups at end of day, counted from rows
-  closedThatDay: number; // jobs in prior day's open list but not this day's
+  unfinishedAtEod: number; // open AND fuDate <= that day (or null) — items the rep should have handled by EOD but didn't
+  closedThatDay: number; // jobs in prior day's open list but not this day's (regardless of fuDate)
   snapshotAt: Date | null; // when the EOD snapshot was actually taken
 }
 
 /**
- * Per-day open count + closed-count for a CSR, for the last N days.
+ * Per-day "unfinished at EOD" + "closed that day" for a CSR, last N days.
  *
- * Binning: by Pacific (America/Los_Angeles) day, so "EOD May 19" is the
- * last snapshot taken during Pacific May 19 — what the reps experience
- * as their workday. UTC binning shifted evening snapshots into the
- * wrong day (e.g. 11pm PDT May 20 = 06:00 UTC May 21 was being shown as
- * May 21 EOD).
+ * "Unfinished at EOD" filters open rows to fuDate <= that day (or null),
+ * so the number reflects what the rep was supposed to finish by EOD and
+ * hadn't — Syncore's open list also contains future-dated items, which
+ * inflate any "total open" count and don't represent today's pending
+ * work.
  *
- * Counts: from the actual rows in followup_rows joined to the EOD
- * snapshot, not the snapshot's reported totalRecords. The two should
- * agree, but the row count is the source of truth — same data backing
- * the closed-day diff, so the two columns stay consistent. (The
- * dashboard's "Closed today" tile had a similar bug recently from
- * trusting a reported total over the row data.)
+ * "Closed that day" is the unfiltered diff: jobs in yesterday's EOD
+ * open list that aren't in today's. Captures everything the rep moved
+ * off their queue during the day, including the occasional future-dated
+ * item they handle early.
  *
- * Returns N entries (we fetch N+1 days of snapshots internally so day
- * 1 has a comparison baseline).
+ * Binning: by Pacific day. Counts derived from joined followup_rows
+ * (not Syncore's reported totalRecords). Returns N entries; we fetch
+ * N+1 days internally so day 1 has a comparison baseline.
  */
 export async function getCsrDailyHistory(opts: {
   csrId: number;
@@ -306,6 +305,7 @@ export async function getCsrDailyHistory(opts: {
     day: string;
     snapshot_at: string | Date;
     job_id: number | string | null;
+    fu_date: string | null;
   }>(sql`
     WITH eod AS (
       SELECT DISTINCT ON (date_trunc('day', snapshot_at AT TIME ZONE 'America/Los_Angeles'))
@@ -323,7 +323,7 @@ export async function getCsrDailyHistory(opts: {
         date_trunc('day', snapshot_at AT TIME ZONE 'America/Los_Angeles') DESC,
         snapshot_at DESC
     )
-    SELECT eod.day, eod.snapshot_at, r.job_id
+    SELECT eod.day, eod.snapshot_at, r.job_id, r.fu_date
     FROM eod
     LEFT JOIN followup_rows r ON r.snapshot_id = eod.snapshot_id
     ORDER BY eod.day ASC
@@ -334,22 +334,38 @@ export async function getCsrDailyHistory(opts: {
       day: string;
       snapshot_at: string | Date;
       job_id: number | string | null;
+      fu_date: string | null;
     }>,
   );
 
-  // Group rows by day. Count is taken from the joined rows, not from
-  // the snapshot's reported total_records.
-  type DayBucket = { snapshotAt: Date | null; jobIds: Set<number> };
+  // Group rows by day. Track two sets per day:
+  //   - allJobIds: every open row, used for the closed-day diff
+  //   - dueJobIds: rows with fuDate <= day (or null), used for "unfinished"
+  type DayBucket = {
+    snapshotAt: Date | null;
+    allJobIds: Set<number>;
+    dueJobIds: Set<number>;
+  };
   const byDay = new Map<string, DayBucket>();
   for (const row of arr) {
     let entry = byDay.get(row.day);
     if (!entry) {
-      entry = { snapshotAt: asDate(row.snapshot_at), jobIds: new Set() };
+      entry = {
+        snapshotAt: asDate(row.snapshot_at),
+        allJobIds: new Set(),
+        dueJobIds: new Set(),
+      };
       byDay.set(row.day, entry);
     }
     if (row.job_id != null) {
       const id = Number(row.job_id);
-      if (Number.isFinite(id)) entry.jobIds.add(id);
+      if (!Number.isFinite(id)) continue;
+      entry.allJobIds.add(id);
+      // Treat null/empty fuDate as "due now" — those are items the rep
+      // needs to act on without a scheduled follow-up date. String
+      // comparison works for YYYY-MM-DD format.
+      const fu = row.fu_date?.trim() || null;
+      if (!fu || fu <= row.day) entry.dueJobIds.add(id);
     }
   }
 
@@ -360,12 +376,12 @@ export async function getCsrDailyHistory(opts: {
     const today = byDay.get(dayKeys[i])!;
     const yesterday = byDay.get(dayKeys[i - 1])!;
     let closed = 0;
-    for (const id of yesterday.jobIds) {
-      if (!today.jobIds.has(id)) closed++;
+    for (const id of yesterday.allJobIds) {
+      if (!today.allJobIds.has(id)) closed++;
     }
     result.push({
       date: dayKeys[i],
-      openAtEod: today.jobIds.size,
+      unfinishedAtEod: today.dueJobIds.size,
       closedThatDay: closed,
       snapshotAt: today.snapshotAt,
     });
