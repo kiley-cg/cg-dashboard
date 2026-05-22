@@ -3,6 +3,7 @@ import {
   SyncoreJobSchema,
   SyncoreLineItemSchema,
   SyncorePurchaseOrderSchema,
+  SyncorePurchaseOrdersListSchema,
   SyncoreQuoteSchema,
   SyncoreSalesOrdersListSchema,
   SyncoreSalesOrderSchema,
@@ -121,7 +122,8 @@ export async function listPurchaseOrders(
   const raw = await syncoreFetch<unknown>(
     `/orders/jobs/${encodeURIComponent(String(jobId))}/purchaseorders`,
   );
-  return z.array(SyncorePurchaseOrderSchema).parse(raw);
+  // Wrapped envelope: { purchaseorders: [...], total_results, links }.
+  return SyncorePurchaseOrdersListSchema.parse(raw).purchaseorders;
 }
 
 export async function getPurchaseOrder(

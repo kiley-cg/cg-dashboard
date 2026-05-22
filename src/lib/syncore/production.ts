@@ -78,6 +78,24 @@ export function parseStitchCount(
 }
 
 /**
+ * Stitch count for a PO. Real Syncore POs carry it on a structured line
+ * item (`type === "StitchCount"`, value in `description` like "7,000"),
+ * not in `decoration_instructions` — so we look there first and fall back
+ * to the free-text parser only if no structured line is present.
+ */
+export function stitchCountFromPo(
+  po: SyncorePurchaseOrder,
+): number | null {
+  for (const li of po.line_items) {
+    if (li.type === "StitchCount" && li.description) {
+      const n = Number(li.description.replace(/,/g, ""));
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return parseStitchCount(po.decoration_instructions);
+}
+
+/**
  * Best-effort total quantity from a PO's line items. POs in Syncore can be
  * either flat (one line per SKU with quantity) or nested like sales orders
  * (Asi → Color → Size, with quantity only on Size leaves). Try flat first,
