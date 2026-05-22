@@ -125,6 +125,24 @@ export type SyncoreSalesOrdersList = z.infer<
   typeof SyncoreSalesOrdersListSchema
 >;
 
+// PO summary as embedded inside Job responses (Job.purchase_orders[]).
+// Sufficient to fan out to per-PO detail fetches; line items live on the
+// detail endpoint.
+export const SyncorePurchaseOrderSummarySchema = z
+  .object({
+    id: z.number(),
+    number: z.number().nullish(),
+    status: z.string().nullish(),
+    sub_total_value: z.number().nullish(),
+    tax_value: z.number().nullish(),
+    total_value: z.number().nullish(),
+    supplier: SyncoreSupplierRefSchema.nullish(),
+  })
+  .passthrough();
+export type SyncorePurchaseOrderSummary = z.infer<
+  typeof SyncorePurchaseOrderSummarySchema
+>;
+
 export const SyncoreJobSchema = z
   .object({
     id: z.number(),
@@ -142,9 +160,40 @@ export const SyncoreJobSchema = z
       .object({ id: z.number(), name: z.string().nullish() })
       .nullish(),
     client: SyncoreClientRefSchema.nullish(),
+    // Per the v2 docs, Job responses embed shallow summaries of both sales
+    // orders and purchase orders. We rely on `purchase_orders[]` to discover
+    // which POs need a full fetch.
+    purchase_orders: z.array(SyncorePurchaseOrderSummarySchema).default([]),
   })
   .passthrough();
 export type SyncoreJob = z.infer<typeof SyncoreJobSchema>;
+
+// Full PO from GET /v2/orders/jobs/{job_id}/purchaseorders/{po_id}.
+// Loose passthrough — the docs list a lot of fields we don't surface today
+// (invoice details, payments, taxes); keep the raw payload in the mirror so
+// new fields are accessible without touching this schema.
+export const SyncorePurchaseOrderSchema = z
+  .object({
+    id: z.number(),
+    number: z.number().nullish(),
+    job_number: z.number().nullish(),
+    date: z.string().nullish(),
+    status: z.string().nullish(),
+    supplier: SyncoreSupplierRefSchema.nullish(),
+    supplier_address: SyncoreAddressSchema.nullish(),
+    ship_to: SyncoreAddressSchema.nullish(),
+    critical_comments: z.string().nullish(),
+    in_hand_date: z.string().nullish(),
+    ship_via: z.string().nullish(),
+    fob: z.string().nullish(),
+    repeat_order_number: z.string().nullish(),
+    shipping_and_instructions: z.string().nullish(),
+    decoration_instructions: z.string().nullish(),
+    csr_instructions_from_so: z.string().nullish(),
+    line_items: z.array(SyncoreLineItemSchema).default([]),
+  })
+  .passthrough();
+export type SyncorePurchaseOrder = z.infer<typeof SyncorePurchaseOrderSchema>;
 
 // Quote schema — Syncore docs don't formally document this endpoint yet,
 // so the shape is intentionally loose (passthrough). We expect at minimum
