@@ -13,6 +13,12 @@ export const authConfig: NextAuthConfig = {
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
+      // Pre-seeded users (created via /admin/users invite) have a row in
+      // `user` but no linked `account`. Without this flag, Auth.js refuses
+      // to attach the Google account on first sign-in and throws
+      // OAuthAccountNotLinked. Safe here because ALLOWED_EMAIL_DOMAIN +
+      // the signIn callback restrict to a Google Workspace we control.
+      allowDangerousEmailAccountLinking: true,
     }),
   ],
   pages: {

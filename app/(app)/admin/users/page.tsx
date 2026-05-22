@@ -5,7 +5,7 @@ import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import { isManager } from "@/lib/managers";
 import { APP_ROLES } from "@/lib/roles";
-import { setUserRole } from "./actions";
+import { inviteUser, setUserRole } from "./actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -45,6 +45,51 @@ export default async function AdminUsersPage() {
           ) always pass every role gate regardless of the value here.
         </p>
       </header>
+
+      <div className="border border-cg-n-200 rounded-card p-4">
+        <h2 className="text-sm font-semibold text-cg-n-800">Invite user</h2>
+        <p className="text-xs text-cg-n-600 mt-1">
+          Pre-create a row so a role is in place before their first sign-in.
+          They land on the right surface immediately when they sign in with
+          Google.
+        </p>
+        <form
+          action={inviteUser}
+          className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_10rem_auto] gap-2"
+        >
+          <input
+            type="text"
+            name="name"
+            placeholder="Name (optional)"
+            className="border border-cg-n-300 rounded-input px-2 py-1 bg-white text-sm"
+          />
+          <input
+            type="email"
+            name="email"
+            required
+            placeholder="email@colorgraphicswa.com"
+            className="border border-cg-n-300 rounded-input px-2 py-1 bg-white text-sm"
+          />
+          <select
+            name="role"
+            defaultValue=""
+            className="border border-cg-n-300 rounded-input px-2 py-1 bg-white text-sm"
+          >
+            <option value="">— no role —</option>
+            {APP_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            className="rounded-btn bg-cg-black text-white px-3 py-1 text-xs font-semibold hover:bg-cg-n-800 transition"
+          >
+            Invite
+          </button>
+        </form>
+      </div>
 
       <div className="border border-cg-n-200 rounded-card overflow-hidden">
         <table className="w-full text-sm">
