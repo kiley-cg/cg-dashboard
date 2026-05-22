@@ -235,11 +235,11 @@ export default async function ProductionPage({ searchParams }: PageProps) {
       </section>
 
       <footer className="mx-8 mb-6 text-[11.5px] text-[#9A917F] leading-relaxed">
-        v2 PO mirror + scheduling.{" "}
+        v2 PO mirror + scheduling + floor status.{" "}
         {mostRecent
           ? `Last mirrored ${mostRecent.toISOString().slice(0, 16).replace("T", " ")} UTC.`
           : "Mirror hasn't run yet."}{" "}
-        Floor-status toggles and receiving land in subsequent phases.
+        Receiving and inbound tracking land in subsequent phases.
         <span className="ml-2">
           <Link href="/admin/users" className="text-cg-teal hover:underline">
             Admin · user roles →

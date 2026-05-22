@@ -7,6 +7,13 @@ import type {
 } from "@/lib/db/production-po";
 import type { Department } from "@/lib/syncore/production";
 import { ScheduleControl } from "./ScheduleControl";
+import { FloorStatusControl } from "./FloorStatusControl";
+
+const FLOOR_STATUSES = ["stopped", "in_progress", "done"] as const;
+type FloorStatus = (typeof FLOOR_STATUSES)[number];
+function asFloorStatus(value: string | null | undefined): FloorStatus {
+  return value === "in_progress" || value === "done" ? value : "stopped";
+}
 
 export interface DayOption {
   iso: string;
@@ -61,6 +68,8 @@ export function PoCard({
   const chip = DEPT_CHIP[department];
   const display = customer ?? shipToBusinessName(po) ?? `Job ${po.syncoreJobId}`;
   const instructions = csrInstructionsSnippet(po);
+  const floorStatus = asFloorStatus(state?.floorStatus);
+  const isDone = floorStatus === "done";
 
   // Inbound apparel summary — how many siblings are still open, the
   // earliest in-hand date so floor knows when shirts are likely landing.
@@ -74,7 +83,12 @@ export function PoCard({
     .sort()[0];
 
   return (
-    <article className="flex gap-3.5 p-4 border border-[#E3DFD3] rounded-card bg-[#FCFBF7] hover:-translate-y-px hover:shadow-md transition">
+    <article
+      className={[
+        "flex gap-3.5 p-4 border border-[#E3DFD3] rounded-card bg-[#FCFBF7] hover:-translate-y-px hover:shadow-md transition",
+        isDone ? "opacity-60" : "",
+      ].join(" ")}
+    >
       <div className="flex-1 min-w-0">
         {/* Identity row */}
         <div className="flex items-center gap-2 flex-wrap">
@@ -133,11 +147,16 @@ export function PoCard({
           </div>
         )}
 
-        <div className="mt-2.5">
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
           <ScheduleControl
             poId={po.poId}
             currentScheduledDate={state?.scheduledDate ?? null}
             days={weekDays}
+          />
+          <FloorStatusControl
+            poId={po.poId}
+            status={floorStatus}
+            syncoreClosedAt={state?.syncoreClosedAt ?? null}
           />
         </div>
       </div>

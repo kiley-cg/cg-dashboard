@@ -138,6 +138,26 @@ export async function getPurchaseOrder(
 }
 
 /**
+ * Transition a Purchase Order to "Posted Manually" status. Per the v2 docs
+ * this is the canonical status for in-house decoration POs once production
+ * is complete — distinct from the AP-posting path used for external
+ * supplier invoices.
+ *
+ * Note the path is `/status/postedmanually` (no underscore, lowercase).
+ */
+export async function postPurchaseOrderManually(
+  jobId: string | number,
+  poId: string | number,
+): Promise<void> {
+  await syncoreFetch<unknown>(
+    `/orders/jobs/${encodeURIComponent(String(jobId))}` +
+      `/purchaseorders/${encodeURIComponent(String(poId))}` +
+      `/status/postedmanually`,
+    { method: "PATCH" },
+  );
+}
+
+/**
  * Flatten the nested line-item tree into one FlatLineItem per stock-keeping
  * Size line. Per the Syncore docs, Size can be a child of Color OR Comment.
  * Walks the parent chain collecting:
