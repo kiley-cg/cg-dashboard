@@ -75,7 +75,9 @@ export async function listJobs(opts: ListJobsOpts): Promise<SyncoreJob[]> {
 export async function listAllJobs(
   opts: ListJobsOpts & { maxPages?: number },
 ): Promise<SyncoreJob[]> {
-  const count = opts.count ?? 100;
+  // 25 = Syncore's default. Bigger counts (100) make the API return 400,
+  // probably hitting an undocumented page-size cap.
+  const count = opts.count ?? 25;
   const maxPages = opts.maxPages ?? 50;
   const out: SyncoreJob[] = [];
   for (let page = 1; page <= maxPages; page++) {

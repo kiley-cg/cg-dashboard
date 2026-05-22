@@ -266,6 +266,10 @@ async function handleSafe(req: Request) {
         ok: false,
         error: message,
         kind: err instanceof Error ? err.name : "unknown",
+        // SyncoreError carries the HTTP status + parsed body — surface
+        // both so the caller can see exactly what the API rejected.
+        status: err instanceof SyncoreError ? err.status : undefined,
+        body: err instanceof SyncoreError ? err.body : undefined,
       },
       { status: 500 },
     );
