@@ -196,17 +196,34 @@ export async function getPurchaseOrder(
  * is complete — distinct from the AP-posting path used for external
  * supplier invoices.
  *
- * Note the path is `/status/postedmanually` (no underscore, lowercase).
+ * Note: the docs document a PATCH endpoint at
+ *   /orders/jobs/{job_id}/purchaseorders/{po_id}/status/postedmanually
+ * but in our tenant that path returns 404 for every spelling we tried
+ * (postedmanually, posted_manually, posted-manually, postedManually,
+ * PostedManually). The path that actually works is a PUT to the PO
+ * resource itself with `{status: "Posted Manually"}` in the body, plus
+ * optional invoice_details for the audit trail. Verified against the
+ * test job in May 2026.
  */
 export async function postPurchaseOrderManually(
   jobId: string | number,
   poId: string | number,
+  opts: {
+    invoiceNumber?: string;
+    invoiceDate?: string; // YYYY-MM-DD
+  } = {},
 ): Promise<void> {
+  const body: Record<string, unknown> = { status: "Posted Manually" };
+  if (opts.invoiceNumber || opts.invoiceDate) {
+    body.invoice_details = {
+      supplier_invoice_number: opts.invoiceNumber,
+      supplier_invoice_date: opts.invoiceDate,
+    };
+  }
   await syncoreFetch<unknown>(
     `/orders/jobs/${encodeURIComponent(String(jobId))}` +
-      `/purchaseorders/${encodeURIComponent(String(poId))}` +
-      `/status/postedmanually`,
-    { method: "PATCH" },
+      `/purchaseorders/${encodeURIComponent(String(poId))}`,
+    { method: "PUT", body },
   );
 }
 
