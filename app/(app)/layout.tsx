@@ -2,6 +2,7 @@ import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 import { isManager } from "@/lib/managers";
+import { hasRoleAccess } from "@/lib/roles";
 
 export default async function AppLayout({
   children,
@@ -10,6 +11,12 @@ export default async function AppLayout({
 }) {
   const session = await auth();
   const showDashboard = isManager(session?.user?.email);
+  const showProduction = await hasRoleAccess({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    required: "production",
+  });
+  const showAdmin = isManager(session?.user?.email);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -23,12 +30,28 @@ export default async function AppLayout({
             <span className="ml-2 text-cg-n-300 text-sm">· Inventory Check</span>
           </Link>
           <div className="flex items-center gap-4 text-sm">
+            {showProduction && (
+              <Link
+                href="/production"
+                className="text-cg-n-300 hover:text-white transition"
+              >
+                Production
+              </Link>
+            )}
             {showDashboard && (
               <Link
                 href="/dashboard"
                 className="text-cg-n-300 hover:text-white transition"
               >
                 Dashboard
+              </Link>
+            )}
+            {showAdmin && (
+              <Link
+                href="/admin/users"
+                className="text-cg-n-300 hover:text-white transition"
+              >
+                Admin
               </Link>
             )}
             {session?.user?.email && (

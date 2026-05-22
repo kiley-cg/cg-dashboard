@@ -51,6 +51,14 @@ export const authConfig: NextAuthConfig = {
       if (path.startsWith("/dashboard") || path.startsWith("/api/dashboard")) {
         return isManager(session.user.email);
       }
+      // /admin/* (role-management UI) is manager-only.
+      if (path.startsWith("/admin") || path.startsWith("/api/admin")) {
+        return isManager(session.user.email);
+      }
+      // /production is role-gated, but role lookup needs the DB which the
+      // edge runtime can't reach. Let any signed-in domain user past the
+      // middleware; the page itself enforces role === "production" (or
+      // manager, who is a superset). See app/(app)/production/page.tsx.
       return true;
     },
   },
