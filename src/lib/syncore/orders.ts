@@ -1,4 +1,5 @@
 import { syncoreFetch } from "./client";
+import { webuiFetch } from "./webui";
 import {
   SyncoreJobSchema,
   SyncoreJobsListSchema,
@@ -191,156 +192,49 @@ export async function getPurchaseOrder(
 }
 
 /**
- * Transition a Purchase Order to "Posted Manually" status. Per the v2 docs
- * this is the canonical status for in-house decoration POs once production
- * is complete — distinct from the AP-posting path used for external
- * supplier invoices.
+ * Drive an in-house decoration PO to "Posted Manually" via the v1 web UI.
  *
- * Path/shape history (verified May 2026 against test job 32681):
- *   - The documented PATCH /status/postedmanually returns 404 in our
- *     tenant for every spelling we tried (probe #46).
- *   - PUT to the resource with `{status: "Posted Manually"}` alone
- *     returns 200 but does NOT actually apply the change — the PO
- *     stays Open. Syncore's PUT is replace-the-resource semantics: a
- *     partial body silently no-ops on the missing fields.
- *   - PUT with the full PO body (current ship_to, in_hand_date, etc.
- *     plus the new status) actually persists the transition. That's
- *     what we do here.
+ * Syncore's v2 REST API does not actually support this transition for
+ * in-house decoration POs:
+ *   - PATCH /v2/.../status/postedmanually returns 404 for every spelling
+ *     we tried (probe #46).
+ *   - PUT /v2/.../purchaseorders/{poId} with status="Posted Manually" or
+ *     status="Approved" plus the full body either silently no-ops or
+ *     gets stuck on docs-vs-validation catch-22s about approval_date /
+ *     posting_date (#47-#53).
  *
- * Caller passes `current` — the existing PO snapshot. The mirror's `raw`
- * jsonb column is the canonical source; closeSyncorePo() reads it from
- * there.
- */
-// Syncore's GET on a PO returns `ship_to.name` (combined) and
-// `ship_to.country` as a display string (e.g. "United States"). The
-// PUT endpoint wants `first_name` + `last_name` (separate) and country
-// as ISO 3166-1 alpha-2 ("US"). Round-tripping the GET shape directly
-// into the PUT yields a 400 from request_model validation, so we
-// normalize on the way out.
-function normalizeShipToForPut(
-  raw: SyncorePurchaseOrder["ship_to"] | undefined | null,
-): Record<string, unknown> | undefined {
-  if (!raw) return undefined;
-  const name = (raw.name ?? "").trim();
-  const parts = name ? name.split(/\s+/) : [];
-  // Fall back to placeholders if the source has no name — Syncore
-  // requires both fields, even if all we care about is the status
-  // transition. "—" is unambiguously a placeholder for auditors.
-  const first_name = parts[0] || "—";
-  const last_name = parts.length > 1 ? parts.slice(1).join(" ") : "—";
-  return {
-    business_name: raw.business_name ?? undefined,
-    first_name,
-    last_name,
-    address1: raw.address1 ?? undefined,
-    address2: raw.address2 ?? undefined,
-    city: raw.city ?? undefined,
-    state: raw.state ?? undefined,
-    zip: raw.zip ?? undefined,
-    country: normalizeCountryToIso(raw.country),
-  };
-}
-
-function normalizeCountryToIso(c: string | null | undefined): string | undefined {
-  if (!c) return undefined;
-  const trimmed = c.trim();
-  if (trimmed.length === 2) return trimmed.toUpperCase();
-  const lc = trimmed.toLowerCase();
-  // Cover what we'll actually see; let anything else through and let
-  // Syncore complain if it's not a real code.
-  if (lc === "united states" || lc === "united states of america" || lc === "usa") {
-    return "US";
-  }
-  if (lc === "canada") return "CA";
-  if (lc === "mexico") return "MX";
-  return trimmed;
-}
-
-// Shared chassis of the PUT body. All the fields Syncore returns on GET
-// minus the read-only ones — passing back what we already had keeps
-// replace-the-resource PUT semantics from clobbering anything.
-function buildPoPutBody(
-  current: SyncorePurchaseOrder,
-  status: string,
-  invoiceDetails: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  const rawAny = current as unknown as Record<string, unknown>;
-  const body: Record<string, unknown> = {
-    ship_to: normalizeShipToForPut(current.ship_to),
-    critical_comments: current.critical_comments,
-    in_hand_date: current.in_hand_date,
-    ship_via: current.ship_via,
-    fob: current.fob,
-    shipping_and_instructions: current.shipping_and_instructions,
-    decoration_instructions: current.decoration_instructions,
-    artwork_value:
-      typeof rawAny.artwork_value === "number" ? rawAny.artwork_value : 0,
-    freight_value:
-      typeof rawAny.freight_value === "number" ? rawAny.freight_value : 0,
-    freight_taxable:
-      typeof rawAny.freight_taxable === "boolean"
-        ? rawAny.freight_taxable
-        : false,
-    tax_1_percentage:
-      typeof rawAny.tax_1_percentage === "number"
-        ? rawAny.tax_1_percentage
-        : 0,
-    status,
-  };
-  if (invoiceDetails) body.invoice_details = invoiceDetails;
-  return body;
-}
-
-async function putPurchaseOrder(
-  jobId: string | number,
-  poId: string | number,
-  body: Record<string, unknown>,
-): Promise<void> {
-  await syncoreFetch<unknown>(
-    `/orders/jobs/${encodeURIComponent(String(jobId))}` +
-      `/purchaseorders/${encodeURIComponent(String(poId))}`,
-    { method: "PUT", body },
-  );
-}
-
-/**
- * Drive an in-house decoration PO to "Posted Manually".
+ * What the Syncore web UI actually does — captured from devtools when
+ * Kiley clicked Approve on an Open PO:
  *
- * Per Kiley's observation of the Syncore web UI: clicking Approve on a
- * PO prompts for supplier_invoice_number + supplier_invoice_date, then
- * the PO auto-transitions Open → Approved → Posted Manually server-side.
- * So we mimic the Approve form: send status="Approved" with the two
- * invoice fields, no date fields (Syncore stamps approval_date and
- * posting_date itself). The auto-transition fires after we PUT.
+ *   POST https://www.ateasesystems.net/api/jobs/{jobId}/purchaseorders/{poId}/supplier-invoices
+ *   { "supplierInvoiceNumber": "Kiley Gustafson" }
  *
- * Earlier attempts that sent approval_date or posting_date were rejected
- * by Syncore's validators ("Unable to change <date> for PO not in
- * <status> status") — docs say those fields are required for the
- * respective transitions, but validation says they're only writable
- * once already in that status. Catch-22 if we set them; Syncore sets
- * them itself if we don't.
+ * Cookie session auth (the same v1 session we already use for
+ * follow-ups). The v1 server handles the whole Approve → Posted
+ * Manually auto-transition internally on that one POST. No dates —
+ * Syncore stamps those itself.
  *
- * For in-house decoration POs there's no real supplier invoice, so we
- * use the signed-in user's name as the invoice number and today's
- * Pacific date as the invoice date. Visible in AP reports as the audit
+ * For in-house decoration the signed-in user's name stands in for the
+ * (non-existent) supplier invoice number, so AP reports show the audit
  * footprint of who closed what.
  */
 export async function postPurchaseOrderManually(
   jobId: string | number,
   poId: string | number,
-  current: SyncorePurchaseOrder,
   opts: {
     invoiceNumber?: string;
-    invoiceDate?: string; // YYYY-MM-DD
   } = {},
 ): Promise<void> {
-  await putPurchaseOrder(
-    jobId,
-    poId,
-    buildPoPutBody(current, "Approved", {
-      supplier_invoice_number: opts.invoiceNumber,
-      supplier_invoice_date: opts.invoiceDate,
-    }),
+  await webuiFetch(
+    `/api/jobs/${encodeURIComponent(String(jobId))}` +
+      `/purchaseorders/${encodeURIComponent(String(poId))}` +
+      `/supplier-invoices`,
+    {
+      method: "POST",
+      body: {
+        supplierInvoiceNumber: opts.invoiceNumber ?? "In-house production",
+      },
+    },
   );
 }
 
