@@ -265,6 +265,27 @@ export async function postPurchaseOrderManually(
     invoiceDate?: string; // YYYY-MM-DD
   } = {},
 ): Promise<void> {
+  // Per the v2 docs, status="Posted Manually" requires `posting_date`
+  // inside invoice_details — leave it out and Syncore returns 200 but
+  // silently no-ops the transition. The supplier_invoice_*  fields are
+  // only docs-required for status="Approved" but we set them for the
+  // audit trail (no real supplier invoice exists for in-house work).
+  const today = opts.invoiceDate;
+  const invoiceDetails: Record<string, unknown> = {
+    posting_date: today,
+  };
+  if (opts.invoiceNumber) {
+    invoiceDetails.supplier_invoice_number = opts.invoiceNumber;
+  }
+  if (today) {
+    invoiceDetails.supplier_invoice_date = today;
+  }
+
+  // The PO body shape Syncore returns on GET has `artwork_value`,
+  // `freight_value`, etc. as passthrough fields not in our typed schema;
+  // pluck them out of the raw payload so we can echo them back. Missing
+  // numeric fields default to 0 to keep Syncore's validators happy.
+  const rawAny = current as unknown as Record<string, unknown>;
   const body: Record<string, unknown> = {
     ship_to: normalizeShipToForPut(current.ship_to),
     critical_comments: current.critical_comments,
@@ -273,14 +294,22 @@ export async function postPurchaseOrderManually(
     fob: current.fob,
     shipping_and_instructions: current.shipping_and_instructions,
     decoration_instructions: current.decoration_instructions,
+    artwork_value: typeof rawAny.artwork_value === "number"
+      ? rawAny.artwork_value
+      : 0,
+    freight_value: typeof rawAny.freight_value === "number"
+      ? rawAny.freight_value
+      : 0,
+    freight_taxable: typeof rawAny.freight_taxable === "boolean"
+      ? rawAny.freight_taxable
+      : false,
+    tax_1_percentage: typeof rawAny.tax_1_percentage === "number"
+      ? rawAny.tax_1_percentage
+      : 0,
     status: "Posted Manually",
+    invoice_details: invoiceDetails,
   };
-  if (opts.invoiceNumber || opts.invoiceDate) {
-    body.invoice_details = {
-      supplier_invoice_number: opts.invoiceNumber,
-      supplier_invoice_date: opts.invoiceDate,
-    };
-  }
+
   await syncoreFetch<unknown>(
     `/orders/jobs/${encodeURIComponent(String(jobId))}` +
       `/purchaseorders/${encodeURIComponent(String(poId))}`,
