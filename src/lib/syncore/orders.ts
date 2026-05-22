@@ -211,6 +211,51 @@ export async function getPurchaseOrder(
  * jsonb column is the canonical source; closeSyncorePo() reads it from
  * there.
  */
+// Syncore's GET on a PO returns `ship_to.name` (combined) and
+// `ship_to.country` as a display string (e.g. "United States"). The
+// PUT endpoint wants `first_name` + `last_name` (separate) and country
+// as ISO 3166-1 alpha-2 ("US"). Round-tripping the GET shape directly
+// into the PUT yields a 400 from request_model validation, so we
+// normalize on the way out.
+function normalizeShipToForPut(
+  raw: SyncorePurchaseOrder["ship_to"] | undefined | null,
+): Record<string, unknown> | undefined {
+  if (!raw) return undefined;
+  const name = (raw.name ?? "").trim();
+  const parts = name ? name.split(/\s+/) : [];
+  // Fall back to placeholders if the source has no name — Syncore
+  // requires both fields, even if all we care about is the status
+  // transition. "—" is unambiguously a placeholder for auditors.
+  const first_name = parts[0] || "—";
+  const last_name = parts.length > 1 ? parts.slice(1).join(" ") : "—";
+  return {
+    business_name: raw.business_name ?? undefined,
+    first_name,
+    last_name,
+    address1: raw.address1 ?? undefined,
+    address2: raw.address2 ?? undefined,
+    city: raw.city ?? undefined,
+    state: raw.state ?? undefined,
+    zip: raw.zip ?? undefined,
+    country: normalizeCountryToIso(raw.country),
+  };
+}
+
+function normalizeCountryToIso(c: string | null | undefined): string | undefined {
+  if (!c) return undefined;
+  const trimmed = c.trim();
+  if (trimmed.length === 2) return trimmed.toUpperCase();
+  const lc = trimmed.toLowerCase();
+  // Cover what we'll actually see; let anything else through and let
+  // Syncore complain if it's not a real code.
+  if (lc === "united states" || lc === "united states of america" || lc === "usa") {
+    return "US";
+  }
+  if (lc === "canada") return "CA";
+  if (lc === "mexico") return "MX";
+  return trimmed;
+}
+
 export async function postPurchaseOrderManually(
   jobId: string | number,
   poId: string | number,
@@ -221,7 +266,7 @@ export async function postPurchaseOrderManually(
   } = {},
 ): Promise<void> {
   const body: Record<string, unknown> = {
-    ship_to: current.ship_to,
+    ship_to: normalizeShipToForPut(current.ship_to),
     critical_comments: current.critical_comments,
     in_hand_date: current.in_hand_date,
     ship_via: current.ship_via,
