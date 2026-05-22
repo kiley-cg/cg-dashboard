@@ -92,18 +92,21 @@ async function handle(req: Request) {
     );
   }
 
-  // Plausible variations of a global jobs-list endpoint. Mirror the
-  // existing pattern for salesorders / purchaseorders which both use the
-  // un-hyphenated noun.
+  // First probe found /orders/jobs requires date_from + date_to. Probe
+  // with those to learn the response shape (envelope key, pagination,
+  // whether status filter is also supported).
+  const today = new Date().toISOString().slice(0, 10);
+  const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const dr = `date_from=${ninetyDaysAgo}&date_to=${today}`;
+
   const candidates = [
-    "/orders/jobs",
-    "/orders/jobs?status=Open",
-    "/orders/jobs?status=WIP",
-    "/orders/jobs?status=Submitted",
-    "/orders/jobs?page=1&count=25",
-    "/orders/jobs?count=10",
-    "/orders/joblist",
-    "/orders/job-list",
+    `/orders/jobs?${dr}`,
+    `/orders/jobs?${dr}&count=5`,
+    `/orders/jobs?${dr}&status=WIP`,
+    `/orders/jobs?${dr}&status=Open`,
+    `/orders/jobs?${dr}&page=1&count=5`,
   ];
 
   const probes = await Promise.all(candidates.map(tryPath));
