@@ -19,7 +19,7 @@ import {
   pacificIsoDate,
   weekDays,
 } from "./_lib/week";
-import { PoCard } from "./_components/PoCard";
+import { PoCard, type DayOption } from "./_components/PoCard";
 import { HuddleSection } from "./_components/HuddleSection";
 import { NotificationToggle } from "./_components/NotificationToggle";
 import { WeekTabs } from "./_components/WeekTabs";
@@ -86,8 +86,9 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     jobIds: Array.from(new Set(decorationPos.map((v) => v.po.syncoreJobId))),
   });
 
-  // Bucket by scheduled date. Null scheduled_date = unscheduled.
-  // Phase 1 has no scheduling action yet, so every PO lands in unscheduled.
+  // Bucket by scheduled date. Null scheduled_date = unscheduled. POs
+  // scheduled to a week other than the displayed one don't render here —
+  // navigate via the week arrows to find them.
   const scheduledByDay = new Map<string, DecorationPoView[]>();
   const unscheduled: DecorationPoView[] = [];
   for (const v of decorationPos) {
@@ -109,6 +110,18 @@ export default async function ProductionPage({ searchParams }: PageProps) {
 
   const prevWeek = addDaysIso(weekStart, -7);
   const nextWeek = addDaysIso(weekStart, 7);
+
+  // Day options for the per-card Schedule dropdown. Always the displayed
+  // week's Mon-Fri — scheduling cross-week happens via the week arrows.
+  const weekDayOptions: DayOption[] = days.map((iso) => ({
+    iso,
+    label: new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    }).format(new Date(`${iso}T12:00:00Z`)),
+  }));
 
   return (
     <div className="min-h-screen bg-[#F7F5EF] text-[#1C2B27]">
@@ -149,8 +162,9 @@ export default async function ProductionPage({ searchParams }: PageProps) {
       <main className="mx-8 bg-white border border-[#E3DFD3] rounded-tr-card rounded-b-card p-4 flex flex-col gap-3">
         {dayItems.length === 0 ? (
           <div className="py-10 text-center text-[#9A917F] italic">
-            Nothing scheduled for this day yet. Scheduling lands in Phase 2 —
-            for now, see the Unscheduled queue below.
+            Nothing scheduled for this day yet. Use the Schedule dropdown
+            on any card in the Unscheduled queue below to place it on this
+            day.
           </div>
         ) : (
           DEPT_ORDER.flatMap((dept) => {
@@ -168,6 +182,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                   apparelSiblings={v.apparelSiblings}
                   department={dept}
                   customer={customerMap.get(v.po.syncoreJobId) ?? null}
+                  weekDays={weekDayOptions}
                 />
               )),
             ];
@@ -209,6 +224,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                       customer={
                         customerMap.get(v.po.syncoreJobId) ?? null
                       }
+                      weekDays={weekDayOptions}
                     />
                   ))}
                 </div>
@@ -219,12 +235,11 @@ export default async function ProductionPage({ searchParams }: PageProps) {
       </section>
 
       <footer className="mx-8 mb-6 text-[11.5px] text-[#9A917F] leading-relaxed">
-        Phase 1 · read-only v2 PO mirror.{" "}
+        v2 PO mirror + scheduling.{" "}
         {mostRecent
           ? `Last mirrored ${mostRecent.toISOString().slice(0, 16).replace("T", " ")} UTC.`
           : "Mirror hasn't run yet."}{" "}
-        Scheduling, floor-status toggles, and receiving land in subsequent
-        phases.
+        Floor-status toggles and receiving land in subsequent phases.
         <span className="ml-2">
           <Link href="/admin/users" className="text-cg-teal hover:underline">
             Admin · user roles →
