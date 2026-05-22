@@ -7,6 +7,7 @@ import { db, schema } from "@/lib/db/client";
 import { hasRoleAccess } from "@/lib/roles";
 import { SyncoreError } from "@/lib/syncore/client";
 import { postPurchaseOrderManually } from "@/lib/syncore/orders";
+import type { SyncorePurchaseOrder } from "@/lib/syncore/types";
 
 export type ActionResult =
   | { ok: true }
@@ -169,10 +170,14 @@ export async function closeSyncorePo(
     return { ok: false, error: "Missing poId" };
   }
 
-  // Look up the PO's parent job id (Syncore PATCH path needs both).
+  // Look up the PO's parent job id + raw snapshot. Syncore's PUT is
+  // replace-the-resource semantics; we need ship_to, in_hand_date, and
+  // friends from the current PO body or the status change silently
+  // no-ops.
   const mirror = await db
     .select({
       jobId: schema.productionPoMirror.syncoreJobId,
+      raw: schema.productionPoMirror.raw,
     })
     .from(schema.productionPoMirror)
     .where(eq(schema.productionPoMirror.poId, poId))
@@ -181,6 +186,13 @@ export async function closeSyncorePo(
     return { ok: false, error: `PO ${poId} is not in the local mirror` };
   }
   const jobId = mirror[0].jobId;
+  const current = mirror[0].raw as SyncorePurchaseOrder | null;
+  if (!current) {
+    return {
+      ok: false,
+      error: `PO ${poId} has no mirrored body — re-run the sync cron`,
+    };
+  }
 
   // Guardrails: only close from done, and only once.
   const state = await db
@@ -205,7 +217,7 @@ export async function closeSyncorePo(
     // signed-in user's name is the natural "invoice number" since
     // there's no actual supplier invoice for in-house work; today's
     // Pacific date is the invoice date.
-    await postPurchaseOrderManually(jobId, poId, {
+    await postPurchaseOrderManually(jobId, poId, current, {
       invoiceNumber: userName ?? "In-house production",
       invoiceDate: todayInPacific(),
     });
