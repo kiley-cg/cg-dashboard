@@ -27,7 +27,6 @@ export default async function AppLayout({
             <span className="font-extrabold tracking-wide uppercase text-sm">
               Color Graphics
             </span>
-            <span className="ml-2 text-cg-n-300 text-sm">· Inventory Check</span>
           </Link>
           <div className="flex items-center gap-4 text-sm">
             {showProduction && (
