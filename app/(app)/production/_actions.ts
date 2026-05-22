@@ -5,7 +5,12 @@ import { eq, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
 import { hasRoleAccess } from "@/lib/roles";
+import { SyncoreError } from "@/lib/syncore/client";
 import { postPurchaseOrderManually } from "@/lib/syncore/orders";
+
+export type ActionResult =
+  | { ok: true }
+  | { ok: false; error: string; status?: number };
 
 const FLOOR_STATUSES = ["stopped", "in_progress", "done"] as const;
 type FloorStatus = (typeof FLOOR_STATUSES)[number];
@@ -125,18 +130,30 @@ export async function setFloorStatus(formData: FormData): Promise<void> {
 /**
  * Flip the Syncore PO to "Posted Manually" status — the canonical
  * "done in-house" state per the v2 docs. Only valid when the dashboard
- * has the PO at floor_status='done' and it hasn't already been closed
- * (syncore_closed_at IS NULL).
+ * has the PO at floor_status='done' and it hasn't already been closed.
  *
- * Best-effort writeback: if Syncore returns an error, the action throws
- * and the local syncore_closed_at stays null. The user can retry.
- * Local floor_status='done' is preserved regardless.
+ * Returns a structured ActionResult instead of throwing so the client can
+ * surface the real Syncore error to the user. In Next.js production
+ * builds, thrown errors from server actions are scrubbed to generic
+ * "Server Components render" messages — useless for diagnosing why
+ * Syncore rejected the PATCH.
  */
-export async function closeSyncorePo(formData: FormData): Promise<void> {
-  await authorize();
+export async function closeSyncorePo(
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    await authorize();
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Not authorized",
+    };
+  }
 
   const poId = formData.get("poId");
-  if (typeof poId !== "string" || !poId) throw new Error("Missing poId");
+  if (typeof poId !== "string" || !poId) {
+    return { ok: false, error: "Missing poId" };
+  }
 
   // Look up the PO's parent job id (Syncore PATCH path needs both).
   const mirror = await db
@@ -146,7 +163,9 @@ export async function closeSyncorePo(formData: FormData): Promise<void> {
     .from(schema.productionPoMirror)
     .where(eq(schema.productionPoMirror.poId, poId))
     .limit(1);
-  if (mirror.length === 0) throw new Error(`PO ${poId} not in mirror`);
+  if (mirror.length === 0) {
+    return { ok: false, error: `PO ${poId} is not in the local mirror` };
+  }
   const jobId = mirror[0].jobId;
 
   // Guardrails: only close from done, and only once.
@@ -156,15 +175,40 @@ export async function closeSyncorePo(formData: FormData): Promise<void> {
     .where(eq(schema.poScheduleState.poId, poId))
     .limit(1);
   if (state.length === 0 || state[0].floorStatus !== "done") {
-    throw new Error("PO must be marked done before closing in Syncore");
+    return {
+      ok: false,
+      error: "Mark the PO Done before closing it in Syncore.",
+    };
   }
   if (state[0].syncoreClosedAt) {
-    // Already closed — make the action idempotent rather than throwing.
     revalidatePath("/production");
-    return;
+    return { ok: true };
   }
 
-  await postPurchaseOrderManually(jobId, poId);
+  try {
+    await postPurchaseOrderManually(jobId, poId);
+  } catch (err) {
+    if (err instanceof SyncoreError) {
+      // Surface the body if it's a structured error message — typical
+      // Syncore validation errors look like:
+      //   { errors: { field: ["..."] }, title: "Bad Request", ... }
+      const detail =
+        typeof err.body === "object" && err.body !== null
+          ? JSON.stringify(err.body)
+          : String(err.body ?? "");
+      return {
+        ok: false,
+        status: err.status,
+        error:
+          `Syncore ${err.status ?? "error"} on PATCH /status/postedmanually` +
+          (detail ? `: ${detail}` : ""),
+      };
+    }
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Unknown error",
+    };
+  }
 
   await db
     .update(schema.poScheduleState)
@@ -172,4 +216,5 @@ export async function closeSyncorePo(formData: FormData): Promise<void> {
     .where(eq(schema.poScheduleState.poId, poId));
 
   revalidatePath("/production");
+  return { ok: true };
 }
