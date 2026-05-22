@@ -1,6 +1,7 @@
 import { syncoreFetch } from "./client";
 import {
   SyncoreJobSchema,
+  SyncoreJobsListSchema,
   SyncoreLineItemSchema,
   SyncorePurchaseOrderSchema,
   SyncorePurchaseOrdersListSchema,
@@ -33,6 +34,56 @@ export async function getJob(jobId: string | number): Promise<SyncoreJob> {
     `/orders/jobs/${encodeURIComponent(String(jobId))}`,
   );
   return SyncoreJobSchema.parse(raw);
+}
+
+export interface ListJobsOpts {
+  // Both dates are REQUIRED by Syncore (400 otherwise). Pacific YYYY-MM-DD.
+  dateFrom: string;
+  dateTo: string;
+  // Optional status filter. Documented values include "WIP", "Pending",
+  // "Submitted", "Closed". "Open" is rejected as a valid status — only
+  // certain ones are accepted; pass what Syncore's UI exposes.
+  status?: string;
+  page?: number;
+  // Default page size when omitted is 25; bumping reduces round-trips.
+  count?: number;
+}
+
+/**
+ * One page of GET /v2/orders/jobs. Returns the inner `jobs` array.
+ */
+export async function listJobs(opts: ListJobsOpts): Promise<SyncoreJob[]> {
+  const raw = await syncoreFetch<unknown>(`/orders/jobs`, {
+    searchParams: {
+      date_from: opts.dateFrom,
+      date_to: opts.dateTo,
+      status: opts.status,
+      page: opts.page,
+      count: opts.count,
+    },
+  });
+  return SyncoreJobsListSchema.parse(raw).jobs;
+}
+
+/**
+ * Paginate through GET /v2/orders/jobs until the API stops returning
+ * full pages. Returns every job in the window matching the (optional)
+ * status filter.
+ *
+ * Bounded by `maxPages` so a runaway response can't burn the cron budget.
+ */
+export async function listAllJobs(
+  opts: ListJobsOpts & { maxPages?: number },
+): Promise<SyncoreJob[]> {
+  const count = opts.count ?? 100;
+  const maxPages = opts.maxPages ?? 50;
+  const out: SyncoreJob[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const batch = await listJobs({ ...opts, page, count });
+    out.push(...batch);
+    if (batch.length < count) break;
+  }
+  return out;
 }
 
 export async function listSalesOrders(

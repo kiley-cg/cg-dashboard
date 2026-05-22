@@ -1,30 +1,40 @@
 // Mirror Syncore v2 purchase orders into production_po_mirror.
 //
-// Syncore v2 has no global "list all open POs" search — only per-job
-// lookups. To find the set of jobs we care about, we use the same
-// follow-ups snapshots the dashboard already maintains as a job-ID seed
-// list. Hourly business-hours cadence keeps the mirror fresh enough for
+// Discovery: Syncore exposes GET /v2/orders/jobs?date_from=&date_to= as a
+// paginated jobs-list. Each job carries its purchase_orders[] inline as
+// summaries (id, status, supplier with class), so we can identify which
+// jobs have in-house decoration POs without an extra per-job fetch. Only
+// those jobs get their full PO list pulled into the mirror.
+//
+// We also re-mirror any job already in production_po_mirror that's missing
+// from the jobs-list window (e.g. moved out of WIP since last run) so
+// previously-mirrored data doesn't go stale.
+//
+// Hourly business-hours cadence keeps the mirror fresh enough for
 // scheduling decisions without hammering Syncore.
 
 import { NextResponse } from "next/server";
-import { listPurchaseOrders } from "@/lib/syncore/orders";
+import { listAllJobs, listPurchaseOrders } from "@/lib/syncore/orders";
 import { SyncoreError } from "@/lib/syncore/client";
-import {
-  getRecentFollowupJobIds,
-  upsertJobPos,
-} from "@/lib/db/production-po";
+import { IN_HOUSE_SUPPLIER_CLASS } from "@/lib/syncore/production";
+import { db, schema } from "@/lib/db/client";
+import { upsertJobPos } from "@/lib/db/production-po";
 
 export const dynamic = "force-dynamic";
 
-// Seed window: how far back in follow-ups to look for active job IDs.
-// Generous so jobs that close out of follow-ups but still have open
-// production POs aren't dropped. Bounded so we don't iterate the whole
-// archive.
-const FOLLOWUP_SEED_DAYS = 30;
+// Date window for the jobs-list seed. Generous so jobs that take a long
+// time to flow through production aren't dropped early; bounded so we
+// don't iterate the whole archive.
+const JOBS_WINDOW_DAYS = 90;
 
-// How many jobs to fetch in parallel. Syncore docs don't publish a rate
-// limit; the followups cron does up to 8 simultaneous calls without issue
-// (2 CSRs × statuses + paging), so 6 here is conservative.
+// Status filter for the jobs-list call. "WIP" is the bucket where
+// production actually happens; other statuses (Pending, Closed) rarely
+// have actionable decoration POs but we union with the already-mirrored
+// set below so we don't drop visibility on edge cases.
+const JOBS_LIST_STATUS: string | undefined = "WIP";
+
+// How many jobs to fetch in parallel when calling listPurchaseOrders.
+// Syncore docs don't publish a rate limit; 6 is conservative.
 const JOB_FETCH_CONCURRENCY = 6;
 
 interface JobRunResult {
@@ -48,6 +58,18 @@ function authorize(req: Request): boolean {
   if (auth === `Bearer ${expected}`) return true;
   const x = req.headers.get("x-cron-secret") ?? "";
   return x === expected;
+}
+
+function todayInPacific(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+  }).format(new Date());
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 async function mirrorOneJob(jobId: string): Promise<JobRunResult> {
@@ -113,19 +135,69 @@ async function handle(req: Request) {
   }
 
   const started = Date.now();
-  const jobIds = await getRecentFollowupJobIds({ days: FOLLOWUP_SEED_DAYS });
+  const url = new URL(req.url);
 
-  if (jobIds.length === 0) {
+  // One-off mode for testing: ?jobId=X mirrors just that job. Skips the
+  // full jobs-list scan.
+  const adHocJobId = url.searchParams.get("jobId");
+
+  let candidateJobIds: string[];
+  let listingMs = 0;
+  let jobsFromList = 0;
+  let jobsAlreadyMirrored = 0;
+
+  if (adHocJobId) {
+    candidateJobIds = [adHocJobId];
+  } else {
+    const dateTo = todayInPacific();
+    const dateFrom = addDaysIso(dateTo, -JOBS_WINDOW_DAYS);
+    const listStart = Date.now();
+    const jobs = await listAllJobs({
+      dateFrom,
+      dateTo,
+      status: JOBS_LIST_STATUS,
+    });
+    listingMs = Date.now() - listStart;
+
+    // Only the jobs that carry at least one decoration PO inline are worth
+    // a per-job listPurchaseOrders fetch. The embedded summary tells us
+    // class without paying for line items.
+    const decorationJobIds = new Set<string>();
+    for (const job of jobs) {
+      const hasDeco = job.purchase_orders.some(
+        (po) => po.supplier?.class === IN_HOUSE_SUPPLIER_CLASS,
+      );
+      if (hasDeco) decorationJobIds.add(String(job.id));
+    }
+    jobsFromList = decorationJobIds.size;
+
+    // Union with any job we've already mirrored — keeps state fresh even
+    // for jobs that have aged out of the WIP window.
+    const existing = await db
+      .select({ jobId: schema.productionPoMirror.syncoreJobId })
+      .from(schema.productionPoMirror);
+    for (const row of existing) decorationJobIds.add(row.jobId);
+
+    jobsAlreadyMirrored = decorationJobIds.size - jobsFromList;
+    candidateJobIds = Array.from(decorationJobIds);
+  }
+
+  if (candidateJobIds.length === 0) {
     return NextResponse.json({
       ok: true,
       jobsConsidered: 0,
+      listingMs,
       runs: [],
       totalMs: Date.now() - started,
-      note: "No follow-up rows in window — mirror skipped.",
+      note: "No candidate jobs in window.",
     });
   }
 
-  const runs = await runInBatches(jobIds, JOB_FETCH_CONCURRENCY, mirrorOneJob);
+  const runs = await runInBatches(
+    candidateJobIds,
+    JOB_FETCH_CONCURRENCY,
+    mirrorOneJob,
+  );
 
   const totals = runs.reduce(
     (acc, r) => {
@@ -151,13 +223,14 @@ async function handle(req: Request) {
     },
   );
 
-  // Strip the skipped runs from the payload — they're noise, the count
-  // is in `totals.jobsSkipped` if you need it.
   const visibleRuns = runs.filter((r) => !r.skipped);
 
   return NextResponse.json({
     ok: true,
-    jobsConsidered: jobIds.length,
+    jobsConsidered: candidateJobIds.length,
+    jobsFromList,
+    jobsAlreadyMirrored,
+    listingMs,
     totals,
     runs: visibleRuns,
     totalMs: Date.now() - started,

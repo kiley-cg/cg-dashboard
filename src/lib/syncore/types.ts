@@ -216,6 +216,23 @@ export type SyncorePurchaseOrdersList = z.infer<
   typeof SyncorePurchaseOrdersListSchema
 >;
 
+// GET /v2/orders/jobs?date_from=&date_to= returns paginated jobs in the
+// same envelope shape (jobs / total_results / links). Required for the
+// production-PO mirror's job discovery — replaces the followup-rows seed.
+export const SyncoreJobsListSchema = z.object({
+  jobs: z.array(SyncoreJobSchema),
+  total_results: z.number().nullish(),
+  links: z
+    .object({
+      prev: z.string().nullish(),
+      self: z.string().nullish(),
+      next: z.string().nullish(),
+    })
+    .partial()
+    .nullish(),
+});
+export type SyncoreJobsList = z.infer<typeof SyncoreJobsListSchema>;
+
 // Quote schema — Syncore docs don't formally document this endpoint yet,
 // so the shape is intentionally loose (passthrough). We expect at minimum
 // id, status, client, and either line_items inline or a related endpoint
