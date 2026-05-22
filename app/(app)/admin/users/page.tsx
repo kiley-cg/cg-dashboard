@@ -4,7 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import { isManager } from "@/lib/managers";
-import { APP_ROLES } from "@/lib/roles";
+import { APP_ROLES, APP_ROLE_LABELS } from "@/lib/roles";
 import { inviteUser, setUserRole } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -78,7 +78,7 @@ export default async function AdminUsersPage() {
             <option value="">— no role —</option>
             {APP_ROLES.map((r) => (
               <option key={r} value={r}>
-                {r}
+                {APP_ROLE_LABELS[r]}
               </option>
             ))}
           </select>
