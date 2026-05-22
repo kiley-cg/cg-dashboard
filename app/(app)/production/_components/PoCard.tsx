@@ -1,12 +1,17 @@
 // One card per decoration PO (v2 model). Replaces the v1 JobCard which
-// rolled multiple POs from the same job into one card. Phase 1: read-only,
-// no scheduling/floor-status toggles yet.
+// rolled multiple POs from the same job into one card.
 
 import type {
   MirroredPo,
   PoScheduleState,
 } from "@/lib/db/production-po";
 import type { Department } from "@/lib/syncore/production";
+import { ScheduleControl } from "./ScheduleControl";
+
+export interface DayOption {
+  iso: string;
+  label: string;
+}
 
 const DEPT_CHIP: Record<Department, { label: string; color: string }> = {
   embroidery: { label: "EMB", color: "#0F6E56" },
@@ -42,12 +47,15 @@ interface Props {
   apparelSiblings: MirroredPo[];
   department: Department;
   customer: string | null; // best-effort, may be null
+  weekDays: DayOption[]; // Mon-Fri of the displayed week
 }
 
 export function PoCard({
   po,
+  state,
   apparelSiblings,
   department,
+  weekDays,
   customer,
 }: Props) {
   const chip = DEPT_CHIP[department];
@@ -124,6 +132,14 @@ export function PoCard({
             {instructions}
           </div>
         )}
+
+        <div className="mt-2.5">
+          <ScheduleControl
+            poId={po.poId}
+            currentScheduledDate={state?.scheduledDate ?? null}
+            days={weekDays}
+          />
+        </div>
       </div>
     </article>
   );
