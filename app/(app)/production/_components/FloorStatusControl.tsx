@@ -42,14 +42,17 @@ export function FloorStatusControl({ poId, status, syncoreClosedAt }: Props) {
       const fd = new FormData();
       fd.set("poId", poId);
       try {
-        await closeSyncorePo(fd);
+        const result = await closeSyncorePo(fd);
+        if (!result.ok) {
+          alert(`Couldn't close PO in Syncore.\n\n${result.error}`);
+        }
       } catch (err) {
-        // Best-effort surface — server error message goes to console; the
-        // page reload after will show the same un-closed state.
+        // Fallback for thrown exceptions (network, etc). Production builds
+        // scrub these messages — useful errors come back via result.error.
         // eslint-disable-next-line no-console
         console.error("[closeSyncorePo] failed:", err);
         alert(
-          `Couldn't close PO in Syncore. ${
+          `Couldn't close PO in Syncore.\n\n${
             err instanceof Error ? err.message : String(err)
           }`,
         );
