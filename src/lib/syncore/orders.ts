@@ -262,10 +262,10 @@ function normalizeCountryToIso(c: string | null | undefined): string | undefined
 function buildPoPutBody(
   current: SyncorePurchaseOrder,
   status: string,
-  invoiceDetails: Record<string, unknown>,
+  invoiceDetails: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
   const rawAny = current as unknown as Record<string, unknown>;
-  return {
+  const body: Record<string, unknown> = {
     ship_to: normalizeShipToForPut(current.ship_to),
     critical_comments: current.critical_comments,
     in_hand_date: current.in_hand_date,
@@ -286,8 +286,9 @@ function buildPoPutBody(
         ? rawAny.tax_1_percentage
         : 0,
     status,
-    invoice_details: invoiceDetails,
   };
+  if (invoiceDetails) body.invoice_details = invoiceDetails;
+  return body;
 }
 
 async function putPurchaseOrder(
@@ -303,57 +304,39 @@ async function putPurchaseOrder(
 }
 
 /**
- * Drive an in-house decoration PO to "Posted Manually" via the documented
- * two-step path:
+ * Drive an in-house decoration PO to "Posted Manually".
  *
- *   Open → Approved → Posted Manually
+ * Syncore's docs vs validation are in direct conflict here:
+ *   - Docs say `posting_date` is required to enter Posted Manually,
+ *     and `approval_date` is required to enter Approved.
+ *   - Validation rejects setting `posting_date` unless the PO is
+ *     already Posted Manually, and rejects setting `approval_date`
+ *     unless already Approved.
  *
- * Why two steps: Syncore rejects setting `posting_date` on a PO that isn't
- * already in a posted status ("Unable to change posting_date for Purchase
- * Order that is not in Posted @ease AP or Posted Manually status") — but
- * the docs also say `posting_date` is required to enter Posted Manually.
- * The only resolution is to go through Approved first.
+ * Both transitions are catch-22 if we send the dates. The probe in
+ * #46 showed that PUT with just `{status: "Posted Manually"}` returns
+ * 200; once-removed (#49) the same call with a full body but with
+ * supplier_invoice_* fields in invoice_details apparently silently
+ * no-op'd. Our best remaining guess is the dates/invoice_details
+ * triggered the silent no-op, not the absence of them. This call
+ * tries the full body but with NO invoice_details at all — let
+ * Syncore auto-populate timestamps if it wants to.
  *
- * For in-house decoration POs there's no real supplier invoice, so we
- * stamp the signed-in user's name as the invoice number and today's
- * Pacific date as the invoice/approval/posting date. Visible in AP
- * reports as an audit footprint of who closed what.
+ * Caller passes `current` from the local PO mirror's `raw` jsonb.
  */
 export async function postPurchaseOrderManually(
   jobId: string | number,
   poId: string | number,
   current: SyncorePurchaseOrder,
-  opts: {
+  _opts: {
     invoiceNumber?: string;
     invoiceDate?: string; // YYYY-MM-DD
   } = {},
 ): Promise<void> {
-  const date = opts.invoiceDate;
-  const invoiceNumber = opts.invoiceNumber;
-
-  // Step 1: Open → Approved. Requires supplier_invoice_number,
-  // supplier_invoice_date, approval_date per the docs.
-  const approvedInvoice: Record<string, unknown> = {
-    supplier_invoice_number: invoiceNumber,
-    supplier_invoice_date: date,
-    approval_date: date,
-  };
   await putPurchaseOrder(
     jobId,
     poId,
-    buildPoPutBody(current, "Approved", approvedInvoice),
-  );
-
-  // Step 2: Approved → Posted Manually. Now we can set posting_date
-  // since the PO is in a posted-eligible state.
-  const postedInvoice: Record<string, unknown> = {
-    ...approvedInvoice,
-    posting_date: date,
-  };
-  await putPurchaseOrder(
-    jobId,
-    poId,
-    buildPoPutBody(current, "Posted Manually", postedInvoice),
+    buildPoPutBody(current, "Posted Manually", undefined),
   );
 }
 
