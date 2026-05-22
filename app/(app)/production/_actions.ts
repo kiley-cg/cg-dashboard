@@ -23,7 +23,10 @@ function isFloorStatus(value: string): value is FloorStatus {
 // strings; no Date math runs server-side for these.
 const ISO_DATE_RX = /^\d{4}-\d{2}-\d{2}$/;
 
-async function authorize(): Promise<{ userId: string | null }> {
+async function authorize(): Promise<{
+  userId: string | null;
+  userName: string | null;
+}> {
   const session = await auth();
   const allowed = await hasRoleAccess({
     email: session?.user?.email,
@@ -31,7 +34,16 @@ async function authorize(): Promise<{ userId: string | null }> {
     required: "production",
   });
   if (!allowed) throw new Error("Not authorized");
-  return { userId: session?.user?.id ?? null };
+  return {
+    userId: session?.user?.id ?? null,
+    userName: session?.user?.name ?? null,
+  };
+}
+
+function todayInPacific(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+  }).format(new Date());
 }
 
 /**
@@ -141,8 +153,10 @@ export async function setFloorStatus(formData: FormData): Promise<void> {
 export async function closeSyncorePo(
   formData: FormData,
 ): Promise<ActionResult> {
+  let userName: string | null = null;
   try {
-    await authorize();
+    const session = await authorize();
+    userName = session.userName;
   } catch (err) {
     return {
       ok: false,
@@ -186,7 +200,15 @@ export async function closeSyncorePo(
   }
 
   try {
-    await postPurchaseOrderManually(jobId, poId);
+    // Tag the close with WHO closed it and WHEN — Syncore's audit log
+    // doesn't otherwise capture this for in-house decoration POs. The
+    // signed-in user's name is the natural "invoice number" since
+    // there's no actual supplier invoice for in-house work; today's
+    // Pacific date is the invoice date.
+    await postPurchaseOrderManually(jobId, poId, {
+      invoiceNumber: userName ?? "In-house production",
+      invoiceDate: todayInPacific(),
+    });
   } catch (err) {
     if (err instanceof SyncoreError) {
       // Surface the body if it's a structured error message — typical
