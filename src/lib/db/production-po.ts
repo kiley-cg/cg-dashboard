@@ -149,7 +149,7 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
       .where(
         and(
           inArray(schema.productionPoMirror.syncoreJobId, jobIds),
-          sql`${schema.productionPoMirror.supplierClass} IS DISTINCT FROM ${IN_HOUSE_SUPPLIER_CLASS}`,
+          sql`(${schema.productionPoMirror.supplierClass} IS NULL OR ${schema.productionPoMirror.supplierClass} != ${IN_HOUSE_SUPPLIER_CLASS})`,
         ),
       ),
   ]);
@@ -220,7 +220,10 @@ export async function getCustomerDisplayMap(opts: {
       job_description,
       contact
     FROM followup_rows
-    WHERE job_id = ANY(${numericIds}::int[])
+    WHERE job_id IN (${sql.join(
+      numericIds.map((n) => sql`${n}`),
+      sql`, `,
+    )})
     ORDER BY job_id, snapshot_at DESC
   `);
   const map = new Map<string, string>();
