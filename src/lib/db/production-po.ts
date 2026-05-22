@@ -172,27 +172,6 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
 }
 
 /**
- * Distinct job IDs from the most recent N days of CSR follow-up snapshots.
- * The mirror cron uses this as its seed list since Syncore v2 doesn't
- * expose a global "all open jobs" search — see the planning thread.
- */
-export async function getRecentFollowupJobIds(opts: {
-  days: number;
-}): Promise<string[]> {
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - opts.days);
-  const rows = await db.execute<{ job_id: number | string }>(sql`
-    SELECT DISTINCT job_id
-    FROM followup_rows
-    WHERE snapshot_at >= ${since.toISOString()}
-  `);
-  const arr = Array.from(rows as Iterable<{ job_id: number | string }>);
-  return arr
-    .map((r) => String(r.job_id))
-    .filter((id) => id !== "" && id !== "null");
-}
-
-/**
  * Best-effort customer-display lookup keyed by Syncore job ID. Joins on
  * the most recent follow-up row for the job; null if the job has never
  * appeared in a follow-up snapshot.
