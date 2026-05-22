@@ -2,14 +2,18 @@ import { syncoreFetch } from "./client";
 import {
   SyncoreJobSchema,
   SyncoreLineItemSchema,
+  SyncorePurchaseOrderSchema,
   SyncoreQuoteSchema,
   SyncoreSalesOrdersListSchema,
   SyncoreSalesOrderSchema,
+  SyncoreSupplierRefSchema,
   type FlatLineItem,
   type SyncoreJob,
   type SyncoreLineItem,
+  type SyncorePurchaseOrder,
   type SyncoreQuote,
   type SyncoreSalesOrder,
+  type SyncoreSupplierRef,
 } from "./types";
 import { z } from "zod";
 
@@ -100,6 +104,35 @@ export async function listQuoteLineItems(
     `/orders/quotes/${encodeURIComponent(String(quoteId))}/lineitems`,
   );
   return z.array(SyncoreLineItemSchema).parse(raw);
+}
+
+// ---------------------------------------------------------------------------
+// Purchase orders & suppliers — used by the Production dashboard's PO mirror.
+// ---------------------------------------------------------------------------
+
+export async function listSuppliers(): Promise<SyncoreSupplierRef[]> {
+  const raw = await syncoreFetch<unknown>(`/orders/suppliers`);
+  return z.array(SyncoreSupplierRefSchema).parse(raw);
+}
+
+export async function listPurchaseOrders(
+  jobId: string | number,
+): Promise<SyncorePurchaseOrder[]> {
+  const raw = await syncoreFetch<unknown>(
+    `/orders/jobs/${encodeURIComponent(String(jobId))}/purchaseorders`,
+  );
+  return z.array(SyncorePurchaseOrderSchema).parse(raw);
+}
+
+export async function getPurchaseOrder(
+  jobId: string | number,
+  poId: string | number,
+): Promise<SyncorePurchaseOrder> {
+  const raw = await syncoreFetch<unknown>(
+    `/orders/jobs/${encodeURIComponent(String(jobId))}` +
+      `/purchaseorders/${encodeURIComponent(String(poId))}`,
+  );
+  return SyncorePurchaseOrderSchema.parse(raw);
 }
 
 /**

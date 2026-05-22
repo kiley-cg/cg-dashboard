@@ -3,8 +3,14 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { hasRoleAccess } from "@/lib/roles";
 import {
-  mockProductionQueue,
-  type ProductionJob,
+  getCustomerDisplayMap,
+  getMostRecentMirrorAt,
+  listOpenDecorationPos,
+  type DecorationPoView,
+} from "@/lib/db/production-po";
+import {
+  departmentForSupplier,
+  type Department,
 } from "@/lib/syncore/production";
 import {
   addDaysIso,
@@ -13,7 +19,7 @@ import {
   pacificIsoDate,
   weekDays,
 } from "./_lib/week";
-import { JobCard } from "./_components/JobCard";
+import { PoCard } from "./_components/PoCard";
 import { HuddleSection } from "./_components/HuddleSection";
 import { NotificationToggle } from "./_components/NotificationToggle";
 import { WeekTabs } from "./_components/WeekTabs";
@@ -30,13 +36,18 @@ interface PageProps {
   }>;
 }
 
-function fmtMinutes(m: number): string {
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  if (h === 0) return `${mm}m`;
-  if (mm === 0) return `${h}h`;
-  return `${h}h ${mm}m`;
-}
+const DEPT_ORDER: Department[] = [
+  "embroidery",
+  "transfers",
+  "fulfillment",
+  "other",
+];
+const DEPT_TITLE: Record<Department, string> = {
+  embroidery: "Embroidery",
+  transfers: "Transfers",
+  fulfillment: "Fulfillment",
+  other: "Other in-house",
+};
 
 export default async function ProductionPage({ searchParams }: PageProps) {
   const session = await auth();
@@ -46,9 +57,6 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     required: "production",
   });
   if (!allowed) {
-    // Defense-in-depth: middleware lets all signed-in users past, the page
-    // enforces role. 404 rather than "forbidden" so the route isn't visibly
-    // gated (matches the existing /dashboard pattern).
     notFound();
   }
 
@@ -61,8 +69,6 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     : mondayOfWeek(today);
   const days = weekDays(weekStart);
 
-  // Active day. `?day=YYYY-MM-DD` overrides; default = today if in this
-  // week, else first day of the displayed week, else weekend default.
   let activeDay: string;
   if (params.day && days.includes(params.day)) {
     activeDay = params.day;
@@ -74,38 +80,38 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     activeDay = defaultActiveDay();
   }
 
-  // Pull all jobs once, partition into per-day counts for the tabs and
-  // filter to the active day for rendering. The mock returns six anchored
-  // to today; once `fetchProductionQueue` is wired, swap this for the real
-  // pull and pass the week range.
-  let jobs: ProductionJob[] = [];
-  try {
-    jobs = mockProductionQueue(today);
-  } catch {
-    jobs = [];
+  const decorationPos = await listOpenDecorationPos();
+  const mostRecent = await getMostRecentMirrorAt();
+  const customerMap = await getCustomerDisplayMap({
+    jobIds: Array.from(new Set(decorationPos.map((v) => v.po.syncoreJobId))),
+  });
+
+  // Bucket by scheduled date. Null scheduled_date = unscheduled.
+  // Phase 1 has no scheduling action yet, so every PO lands in unscheduled.
+  const scheduledByDay = new Map<string, DecorationPoView[]>();
+  const unscheduled: DecorationPoView[] = [];
+  for (const v of decorationPos) {
+    const d = v.state?.scheduledDate;
+    if (d) {
+      const arr = scheduledByDay.get(d) ?? [];
+      arr.push(v);
+      scheduledByDay.set(d, arr);
+    } else {
+      unscheduled.push(v);
+    }
   }
 
-  const countByDay = new Map<string, number>();
-  for (const j of jobs) {
-    countByDay.set(j.scheduled, (countByDay.get(j.scheduled) ?? 0) + 1);
-  }
+  const countByDay: Record<string, number> = {};
+  for (const d of days) countByDay[d] = scheduledByDay.get(d)?.length ?? 0;
 
-  const dayJobs = jobs
-    .filter((j) => j.scheduled === activeDay)
-    .sort((a, b) => {
-      // Urgent flag would float to top here once persisted state is wired;
-      // for now sort by due date alone.
-      return a.due.localeCompare(b.due);
-    });
-
-  const totalMinutes = dayJobs.reduce((s, j) => s + (j.calcMinutes ?? 0), 0);
+  const dayItems = scheduledByDay.get(activeDay) ?? [];
+  const unscheduledByDept = groupByDepartment(unscheduled);
 
   const prevWeek = addDaysIso(weekStart, -7);
   const nextWeek = addDaysIso(weekStart, 7);
 
   return (
     <div className="min-h-screen bg-[#F7F5EF] text-[#1C2B27]">
-      {/* Masthead */}
       <header className="flex flex-wrap items-end justify-between gap-3 px-8 pt-7 pb-4 border-b-2 border-[#1C2B27]">
         <div>
           <p className="text-[11px] tracking-[.14em] uppercase font-bold text-cg-teal">
@@ -118,7 +124,6 @@ export default async function ProductionPage({ searchParams }: PageProps) {
         <NotificationToggle />
       </header>
 
-      {/* Week navigation + 5-day tabs */}
       <div className="px-8 pt-4 flex flex-wrap items-end gap-3">
         <WeekArrows
           prevHref={`/production?week=${prevWeek}`}
@@ -129,42 +134,97 @@ export default async function ProductionPage({ searchParams }: PageProps) {
           days={days}
           activeDay={activeDay}
           weekStart={weekStart}
-          countByDay={Object.fromEntries(countByDay)}
+          countByDay={countByDay}
           today={today}
         />
         <div className="ml-auto text-right">
           <span className="block text-[10px] tracking-[.1em] uppercase text-[#9A917F]">
-            Scheduled load
+            Open decoration POs
           </span>
-          <strong className="text-xl font-serif">
-            {fmtMinutes(totalMinutes)}
-          </strong>
+          <strong className="text-xl font-serif">{decorationPos.length}</strong>
         </div>
       </div>
 
-      {/* Job cards */}
+      {/* Scheduled section — current day's cards */}
       <main className="mx-8 bg-white border border-[#E3DFD3] rounded-tr-card rounded-b-card p-4 flex flex-col gap-3">
-        {dayJobs.length === 0 ? (
+        {dayItems.length === 0 ? (
           <div className="py-10 text-center text-[#9A917F] italic">
-            Nothing scheduled for this day yet.
+            Nothing scheduled for this day yet. Scheduling lands in Phase 2 —
+            for now, see the Unscheduled queue below.
           </div>
         ) : (
-          dayJobs.map((j) => (
-            <JobCard
-              key={j.jobId}
-              job={j}
-              isLastDayOfWeek={activeDay === days[days.length - 1]}
-            />
-          ))
+          DEPT_ORDER.flatMap((dept) => {
+            const items = dayItems.filter(
+              (v) => departmentForSupplier(v.po.supplierName) === dept,
+            );
+            if (items.length === 0) return [];
+            return [
+              <DeptHeader key={`h-${dept}`} dept={dept} count={items.length} />,
+              ...items.map((v) => (
+                <PoCard
+                  key={v.po.poId}
+                  po={v.po}
+                  state={v.state}
+                  apparelSiblings={v.apparelSiblings}
+                  department={dept}
+                  customer={customerMap.get(v.po.syncoreJobId) ?? null}
+                />
+              )),
+            ];
+          })
         )}
 
         <HuddleSection activeDay={activeDay} />
       </main>
 
-      <footer className="mx-8 mt-4 text-[11.5px] text-[#9A917F] leading-relaxed">
-        Slice #1 scaffold · mock data stands in for Syncore @ease v1 Production
-        Queue. Done/urgent/carry state and huddle tasks land in Postgres once
-        the v1 endpoint is wired (see scripts/discover-production-queue.ts).
+      {/* Unscheduled queue */}
+      <section className="mx-8 mt-6 mb-8">
+        <h2 className="text-[12px] tracking-[.14em] uppercase font-bold text-cg-teal mb-2">
+          Unscheduled · {unscheduled.length} PO
+          {unscheduled.length === 1 ? "" : "s"}
+        </h2>
+        {unscheduled.length === 0 ? (
+          <div className="bg-white border border-[#E3DFD3] rounded-card p-6 text-center text-[#9A917F] italic">
+            No open decoration POs. Either the mirror cron hasn&apos;t run yet,
+            or everything in production is done.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {DEPT_ORDER.map((dept) => {
+              const items = unscheduledByDept.get(dept) ?? [];
+              if (items.length === 0) return null;
+              return (
+                <div
+                  key={dept}
+                  className="bg-white border border-[#E3DFD3] rounded-card p-3 flex flex-col gap-3"
+                >
+                  <DeptHeader dept={dept} count={items.length} />
+                  {items.map((v) => (
+                    <PoCard
+                      key={v.po.poId}
+                      po={v.po}
+                      state={v.state}
+                      apparelSiblings={v.apparelSiblings}
+                      department={dept}
+                      customer={
+                        customerMap.get(v.po.syncoreJobId) ?? null
+                      }
+                    />
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <footer className="mx-8 mb-6 text-[11.5px] text-[#9A917F] leading-relaxed">
+        Phase 1 · read-only v2 PO mirror.{" "}
+        {mostRecent
+          ? `Last mirrored ${mostRecent.toISOString().slice(0, 16).replace("T", " ")} UTC.`
+          : "Mirror hasn't run yet."}{" "}
+        Scheduling, floor-status toggles, and receiving land in subsequent
+        phases.
         <span className="ml-2">
           <Link href="/admin/users" className="text-cg-teal hover:underline">
             Admin · user roles →
@@ -172,6 +232,35 @@ export default async function ProductionPage({ searchParams }: PageProps) {
         </span>
       </footer>
     </div>
+  );
+}
+
+function groupByDepartment(
+  items: DecorationPoView[],
+): Map<Department, DecorationPoView[]> {
+  const out = new Map<Department, DecorationPoView[]>();
+  for (const v of items) {
+    const d = departmentForSupplier(v.po.supplierName);
+    const arr = out.get(d) ?? [];
+    arr.push(v);
+    out.set(d, arr);
+  }
+  // Sort each bucket by earliest in_hand_date so urgent stuff floats up.
+  for (const arr of out.values()) {
+    arr.sort((a, b) => {
+      const ai = a.po.inHandDate ?? "9999-12-31";
+      const bi = b.po.inHandDate ?? "9999-12-31";
+      return ai.localeCompare(bi);
+    });
+  }
+  return out;
+}
+
+function DeptHeader({ dept, count }: { dept: Department; count: number }) {
+  return (
+    <h3 className="text-[11px] tracking-[.12em] uppercase font-bold text-[#5A5346] border-b border-[#E3DFD3] pb-1 mt-2 first:mt-0">
+      {DEPT_TITLE[dept]} · {count}
+    </h3>
   );
 }
 
