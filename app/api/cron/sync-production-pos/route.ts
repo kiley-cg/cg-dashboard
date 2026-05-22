@@ -14,6 +14,7 @@
 // scheduling decisions without hammering Syncore.
 
 import { NextResponse } from "next/server";
+import { notInArray } from "drizzle-orm";
 import { listAllJobs, listPurchaseOrders } from "@/lib/syncore/orders";
 import { SyncoreError } from "@/lib/syncore/client";
 import { IN_HOUSE_SUPPLIER_CLASS } from "@/lib/syncore/production";
@@ -21,6 +22,10 @@ import { db, schema } from "@/lib/db/client";
 import { upsertJobPos } from "@/lib/db/production-po";
 
 export const dynamic = "force-dynamic";
+// Vercel function timeout. The listAllJobs paginate + per-job
+// listPurchaseOrders fanout can take 30-60 seconds on a populated tenant.
+// 60s is the Hobby cap and works on Pro too; bump if we ever need more.
+export const maxDuration = 60;
 
 // Date window for the jobs-list seed. Generous so jobs that take a long
 // time to flow through production aren't dropped early; bounded so we
@@ -171,11 +176,20 @@ async function handle(req: Request) {
     }
     jobsFromList = decorationJobIds.size;
 
-    // Union with any job we've already mirrored — keeps state fresh even
-    // for jobs that have aged out of the WIP window.
+    // Union with any job we've already mirrored AND that still has at
+    // least one non-terminal PO — keeps state fresh for jobs aged out
+    // of the WIP window without refreshing thousands of Posted/Paid POs
+    // that won't ever change again.
     const existing = await db
-      .select({ jobId: schema.productionPoMirror.syncoreJobId })
-      .from(schema.productionPoMirror);
+      .selectDistinct({ jobId: schema.productionPoMirror.syncoreJobId })
+      .from(schema.productionPoMirror)
+      .where(
+        notInArray(schema.productionPoMirror.status, [
+          "Posted Manually",
+          "Posted @ease A/P",
+          "Paid",
+        ]),
+      );
     for (const row of existing) decorationJobIds.add(row.jobId);
 
     jobsAlreadyMirrored = decorationJobIds.size - jobsFromList;
@@ -237,10 +251,31 @@ async function handle(req: Request) {
   });
 }
 
+// Top-level error wrap so an exception in handle() returns a useful
+// JSON body instead of an empty 500. Without this, Vercel/Next.js
+// scrubs the error message, leaving the caller with `STATUS=500 SIZE=0`
+// and no way to diagnose.
+async function handleSafe(req: Request) {
+  try {
+    return await handle(req);
+  } catch (err) {
+    console.error("[sync-production-pos] uncaught:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: message,
+        kind: err instanceof Error ? err.name : "unknown",
+      },
+      { status: 500 },
+    );
+  }
+}
+
 export async function GET(req: Request) {
-  return handle(req);
+  return handleSafe(req);
 }
 
 export async function POST(req: Request) {
-  return handle(req);
+  return handleSafe(req);
 }
