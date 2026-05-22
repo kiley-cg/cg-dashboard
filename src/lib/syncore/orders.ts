@@ -306,29 +306,30 @@ async function putPurchaseOrder(
 /**
  * Drive an in-house decoration PO to "Posted Manually".
  *
- * Syncore's docs vs validation are in direct conflict here:
- *   - Docs say `posting_date` is required to enter Posted Manually,
- *     and `approval_date` is required to enter Approved.
- *   - Validation rejects setting `posting_date` unless the PO is
- *     already Posted Manually, and rejects setting `approval_date`
- *     unless already Approved.
+ * Per Kiley's observation of the Syncore web UI: clicking Approve on a
+ * PO prompts for supplier_invoice_number + supplier_invoice_date, then
+ * the PO auto-transitions Open → Approved → Posted Manually server-side.
+ * So we mimic the Approve form: send status="Approved" with the two
+ * invoice fields, no date fields (Syncore stamps approval_date and
+ * posting_date itself). The auto-transition fires after we PUT.
  *
- * Both transitions are catch-22 if we send the dates. The probe in
- * #46 showed that PUT with just `{status: "Posted Manually"}` returns
- * 200; once-removed (#49) the same call with a full body but with
- * supplier_invoice_* fields in invoice_details apparently silently
- * no-op'd. Our best remaining guess is the dates/invoice_details
- * triggered the silent no-op, not the absence of them. This call
- * tries the full body but with NO invoice_details at all — let
- * Syncore auto-populate timestamps if it wants to.
+ * Earlier attempts that sent approval_date or posting_date were rejected
+ * by Syncore's validators ("Unable to change <date> for PO not in
+ * <status> status") — docs say those fields are required for the
+ * respective transitions, but validation says they're only writable
+ * once already in that status. Catch-22 if we set them; Syncore sets
+ * them itself if we don't.
  *
- * Caller passes `current` from the local PO mirror's `raw` jsonb.
+ * For in-house decoration POs there's no real supplier invoice, so we
+ * use the signed-in user's name as the invoice number and today's
+ * Pacific date as the invoice date. Visible in AP reports as the audit
+ * footprint of who closed what.
  */
 export async function postPurchaseOrderManually(
   jobId: string | number,
   poId: string | number,
   current: SyncorePurchaseOrder,
-  _opts: {
+  opts: {
     invoiceNumber?: string;
     invoiceDate?: string; // YYYY-MM-DD
   } = {},
@@ -336,7 +337,10 @@ export async function postPurchaseOrderManually(
   await putPurchaseOrder(
     jobId,
     poId,
-    buildPoPutBody(current, "Posted Manually", undefined),
+    buildPoPutBody(current, "Approved", {
+      supplier_invoice_number: opts.invoiceNumber,
+      supplier_invoice_date: opts.invoiceDate,
+    }),
   );
 }
 
