@@ -9,12 +9,39 @@ import { users } from "./db/schema";
 import { eq } from "drizzle-orm";
 import { isManager } from "./managers";
 
-export type AppRole = "production" | "csr" | "manager";
+export type AppRole =
+  | "production"
+  | "csr"
+  | "sales"
+  | "sales_assistant"
+  | "manager";
 
-export const APP_ROLES: AppRole[] = ["production", "csr", "manager"];
+export const APP_ROLES: AppRole[] = [
+  "production",
+  "csr",
+  "sales",
+  "sales_assistant",
+  "manager",
+];
+
+// Display labels for the admin UI. Values stay snake_case for storage so
+// they're safe in DB rows and URLs; humans see the title-cased version.
+export const APP_ROLE_LABELS: Record<AppRole, string> = {
+  production: "Production",
+  csr: "CSR",
+  sales: "Sales",
+  sales_assistant: "Sales Assistant",
+  manager: "Manager",
+};
 
 export function isAppRole(value: string | null | undefined): value is AppRole {
-  return value === "production" || value === "csr" || value === "manager";
+  return (
+    value === "production" ||
+    value === "csr" ||
+    value === "sales" ||
+    value === "sales_assistant" ||
+    value === "manager"
+  );
 }
 
 // Server-only — hits Drizzle. Call from server components / route handlers
