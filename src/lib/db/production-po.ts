@@ -9,7 +9,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "./client";
 import {
   IN_HOUSE_SUPPLIER_CLASS,
-  parseStitchCount,
+  stitchCountFromPo,
   totalQuantity,
 } from "@/lib/syncore/production";
 import type { SyncorePurchaseOrder } from "@/lib/syncore/types";
@@ -54,7 +54,7 @@ export async function upsertJobPos(args: {
     supplierClass: po.supplier?.class ?? null,
     inHandDate: po.in_hand_date ?? null,
     decorationInstructions: po.decoration_instructions ?? null,
-    stitchCount: parseStitchCount(po.decoration_instructions),
+    stitchCount: stitchCountFromPo(po),
     totalQuantity: totalQuantity(po),
     raw: po as unknown,
     mirroredAt: new Date(),

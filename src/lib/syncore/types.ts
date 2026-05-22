@@ -195,6 +195,27 @@ export const SyncorePurchaseOrderSchema = z
   .passthrough();
 export type SyncorePurchaseOrder = z.infer<typeof SyncorePurchaseOrderSchema>;
 
+// GET /v2/orders/jobs/{job_id}/purchaseorders returns a wrapper envelope
+// mirroring salesorders: `{ purchaseorders: [...], total_results, links }`.
+// Not a raw array — that mistake was the silent root cause of the cron
+// reporting 2333/2333 "404"s in the first probe pass (Zod was actually
+// rejecting the response shape, and the SyncoreError message hid it).
+export const SyncorePurchaseOrdersListSchema = z.object({
+  purchaseorders: z.array(SyncorePurchaseOrderSchema),
+  total_results: z.number().nullish(),
+  links: z
+    .object({
+      prev: z.string().nullish(),
+      self: z.string().nullish(),
+      next: z.string().nullish(),
+    })
+    .partial()
+    .nullish(),
+});
+export type SyncorePurchaseOrdersList = z.infer<
+  typeof SyncorePurchaseOrdersListSchema
+>;
+
 // Quote schema — Syncore docs don't formally document this endpoint yet,
 // so the shape is intentionally loose (passthrough). We expect at minimum
 // id, status, client, and either line_items inline or a related endpoint
