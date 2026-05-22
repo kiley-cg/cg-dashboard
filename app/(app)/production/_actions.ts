@@ -233,8 +233,7 @@ export async function closeSyncorePo(
       return {
         ok: false,
         status: err.status,
-        error:
-          `Syncore ${err.status ?? "error"} on PATCH /status/postedmanually` +
+        error: `Syncore ${err.status ?? "error"} closing PO` +
           (detail ? `: ${detail}` : ""),
       };
     }
