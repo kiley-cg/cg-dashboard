@@ -113,7 +113,16 @@ async function handle(req: Request) {
   }
 
   const started = Date.now();
-  const jobIds = await getRecentFollowupJobIds({ days: FOLLOWUP_SEED_DAYS });
+
+  // One-off mode: ?jobId=X mirrors just that job. Useful for jobs that
+  // haven't shown up in a CSR follow-up snapshot yet (e.g. brand-new
+  // test jobs). Falls through to the seed-based bulk path when absent.
+  const url = new URL(req.url);
+  const adHocJobId = url.searchParams.get("jobId");
+
+  const jobIds = adHocJobId
+    ? [adHocJobId]
+    : await getRecentFollowupJobIds({ days: FOLLOWUP_SEED_DAYS });
 
   if (jobIds.length === 0) {
     return NextResponse.json({
