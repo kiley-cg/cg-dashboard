@@ -196,24 +196,40 @@ export async function getPurchaseOrder(
  * is complete — distinct from the AP-posting path used for external
  * supplier invoices.
  *
- * Note: the docs document a PATCH endpoint at
- *   /orders/jobs/{job_id}/purchaseorders/{po_id}/status/postedmanually
- * but in our tenant that path returns 404 for every spelling we tried
- * (postedmanually, posted_manually, posted-manually, postedManually,
- * PostedManually). The path that actually works is a PUT to the PO
- * resource itself with `{status: "Posted Manually"}` in the body, plus
- * optional invoice_details for the audit trail. Verified against the
- * test job in May 2026.
+ * Path/shape history (verified May 2026 against test job 32681):
+ *   - The documented PATCH /status/postedmanually returns 404 in our
+ *     tenant for every spelling we tried (probe #46).
+ *   - PUT to the resource with `{status: "Posted Manually"}` alone
+ *     returns 200 but does NOT actually apply the change — the PO
+ *     stays Open. Syncore's PUT is replace-the-resource semantics: a
+ *     partial body silently no-ops on the missing fields.
+ *   - PUT with the full PO body (current ship_to, in_hand_date, etc.
+ *     plus the new status) actually persists the transition. That's
+ *     what we do here.
+ *
+ * Caller passes `current` — the existing PO snapshot. The mirror's `raw`
+ * jsonb column is the canonical source; closeSyncorePo() reads it from
+ * there.
  */
 export async function postPurchaseOrderManually(
   jobId: string | number,
   poId: string | number,
+  current: SyncorePurchaseOrder,
   opts: {
     invoiceNumber?: string;
     invoiceDate?: string; // YYYY-MM-DD
   } = {},
 ): Promise<void> {
-  const body: Record<string, unknown> = { status: "Posted Manually" };
+  const body: Record<string, unknown> = {
+    ship_to: current.ship_to,
+    critical_comments: current.critical_comments,
+    in_hand_date: current.in_hand_date,
+    ship_via: current.ship_via,
+    fob: current.fob,
+    shipping_and_instructions: current.shipping_and_instructions,
+    decoration_instructions: current.decoration_instructions,
+    status: "Posted Manually",
+  };
   if (opts.invoiceNumber || opts.invoiceDate) {
     body.invoice_details = {
       supplier_invoice_number: opts.invoiceNumber,
