@@ -256,6 +256,69 @@ function normalizeCountryToIso(c: string | null | undefined): string | undefined
   return trimmed;
 }
 
+// Shared chassis of the PUT body. All the fields Syncore returns on GET
+// minus the read-only ones — passing back what we already had keeps
+// replace-the-resource PUT semantics from clobbering anything.
+function buildPoPutBody(
+  current: SyncorePurchaseOrder,
+  status: string,
+  invoiceDetails: Record<string, unknown>,
+): Record<string, unknown> {
+  const rawAny = current as unknown as Record<string, unknown>;
+  return {
+    ship_to: normalizeShipToForPut(current.ship_to),
+    critical_comments: current.critical_comments,
+    in_hand_date: current.in_hand_date,
+    ship_via: current.ship_via,
+    fob: current.fob,
+    shipping_and_instructions: current.shipping_and_instructions,
+    decoration_instructions: current.decoration_instructions,
+    artwork_value:
+      typeof rawAny.artwork_value === "number" ? rawAny.artwork_value : 0,
+    freight_value:
+      typeof rawAny.freight_value === "number" ? rawAny.freight_value : 0,
+    freight_taxable:
+      typeof rawAny.freight_taxable === "boolean"
+        ? rawAny.freight_taxable
+        : false,
+    tax_1_percentage:
+      typeof rawAny.tax_1_percentage === "number"
+        ? rawAny.tax_1_percentage
+        : 0,
+    status,
+    invoice_details: invoiceDetails,
+  };
+}
+
+async function putPurchaseOrder(
+  jobId: string | number,
+  poId: string | number,
+  body: Record<string, unknown>,
+): Promise<void> {
+  await syncoreFetch<unknown>(
+    `/orders/jobs/${encodeURIComponent(String(jobId))}` +
+      `/purchaseorders/${encodeURIComponent(String(poId))}`,
+    { method: "PUT", body },
+  );
+}
+
+/**
+ * Drive an in-house decoration PO to "Posted Manually" via the documented
+ * two-step path:
+ *
+ *   Open → Approved → Posted Manually
+ *
+ * Why two steps: Syncore rejects setting `posting_date` on a PO that isn't
+ * already in a posted status ("Unable to change posting_date for Purchase
+ * Order that is not in Posted @ease AP or Posted Manually status") — but
+ * the docs also say `posting_date` is required to enter Posted Manually.
+ * The only resolution is to go through Approved first.
+ *
+ * For in-house decoration POs there's no real supplier invoice, so we
+ * stamp the signed-in user's name as the invoice number and today's
+ * Pacific date as the invoice/approval/posting date. Visible in AP
+ * reports as an audit footprint of who closed what.
+ */
 export async function postPurchaseOrderManually(
   jobId: string | number,
   poId: string | number,
@@ -265,55 +328,32 @@ export async function postPurchaseOrderManually(
     invoiceDate?: string; // YYYY-MM-DD
   } = {},
 ): Promise<void> {
-  // Per the v2 docs, status="Posted Manually" requires `posting_date`
-  // inside invoice_details — leave it out and Syncore returns 200 but
-  // silently no-ops the transition. The supplier_invoice_*  fields are
-  // only docs-required for status="Approved" but we set them for the
-  // audit trail (no real supplier invoice exists for in-house work).
-  const today = opts.invoiceDate;
-  const invoiceDetails: Record<string, unknown> = {
-    posting_date: today,
-  };
-  if (opts.invoiceNumber) {
-    invoiceDetails.supplier_invoice_number = opts.invoiceNumber;
-  }
-  if (today) {
-    invoiceDetails.supplier_invoice_date = today;
-  }
+  const date = opts.invoiceDate;
+  const invoiceNumber = opts.invoiceNumber;
 
-  // The PO body shape Syncore returns on GET has `artwork_value`,
-  // `freight_value`, etc. as passthrough fields not in our typed schema;
-  // pluck them out of the raw payload so we can echo them back. Missing
-  // numeric fields default to 0 to keep Syncore's validators happy.
-  const rawAny = current as unknown as Record<string, unknown>;
-  const body: Record<string, unknown> = {
-    ship_to: normalizeShipToForPut(current.ship_to),
-    critical_comments: current.critical_comments,
-    in_hand_date: current.in_hand_date,
-    ship_via: current.ship_via,
-    fob: current.fob,
-    shipping_and_instructions: current.shipping_and_instructions,
-    decoration_instructions: current.decoration_instructions,
-    artwork_value: typeof rawAny.artwork_value === "number"
-      ? rawAny.artwork_value
-      : 0,
-    freight_value: typeof rawAny.freight_value === "number"
-      ? rawAny.freight_value
-      : 0,
-    freight_taxable: typeof rawAny.freight_taxable === "boolean"
-      ? rawAny.freight_taxable
-      : false,
-    tax_1_percentage: typeof rawAny.tax_1_percentage === "number"
-      ? rawAny.tax_1_percentage
-      : 0,
-    status: "Posted Manually",
-    invoice_details: invoiceDetails,
+  // Step 1: Open → Approved. Requires supplier_invoice_number,
+  // supplier_invoice_date, approval_date per the docs.
+  const approvedInvoice: Record<string, unknown> = {
+    supplier_invoice_number: invoiceNumber,
+    supplier_invoice_date: date,
+    approval_date: date,
   };
+  await putPurchaseOrder(
+    jobId,
+    poId,
+    buildPoPutBody(current, "Approved", approvedInvoice),
+  );
 
-  await syncoreFetch<unknown>(
-    `/orders/jobs/${encodeURIComponent(String(jobId))}` +
-      `/purchaseorders/${encodeURIComponent(String(poId))}`,
-    { method: "PUT", body },
+  // Step 2: Approved → Posted Manually. Now we can set posting_date
+  // since the PO is in a posted-eligible state.
+  const postedInvoice: Record<string, unknown> = {
+    ...approvedInvoice,
+    posting_date: date,
+  };
+  await putPurchaseOrder(
+    jobId,
+    poId,
+    buildPoPutBody(current, "Posted Manually", postedInvoice),
   );
 }
 
