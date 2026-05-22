@@ -8,6 +8,7 @@
 
 import { NextResponse } from "next/server";
 import { listPurchaseOrders } from "@/lib/syncore/orders";
+import { SyncoreError } from "@/lib/syncore/client";
 import {
   getRecentFollowupJobIds,
   upsertJobPos,
@@ -32,6 +33,10 @@ interface JobRunResult {
   upserted?: number;
   decorationPoCount?: number;
   apparelPoCount?: number;
+  // "skipped" = Syncore returned 404 for the job (archived/closed/no POs).
+  // Counted separately from real errors so the failure stat reflects only
+  // genuine breakage.
+  skipped?: boolean;
   error?: string;
   ms: number;
 }
@@ -59,6 +64,21 @@ async function mirrorOneJob(jobId: string): Promise<JobRunResult> {
       ms: Date.now() - started,
     };
   } catch (err) {
+    // Syncore returns 404 for archived/closed jobs and for jobs that
+    // never had POs attached. Most "failures" we were seeing were these,
+    // not real errors — skip silently so the run summary highlights only
+    // genuine breakage.
+    if (err instanceof SyncoreError && err.status === 404) {
+      return {
+        jobId,
+        ok: true,
+        skipped: true,
+        upserted: 0,
+        decorationPoCount: 0,
+        apparelPoCount: 0,
+        ms: Date.now() - started,
+      };
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[sync-production-pos] job ${jobId} failed:`, err);
     return {
@@ -109,7 +129,9 @@ async function handle(req: Request) {
 
   const totals = runs.reduce(
     (acc, r) => {
-      if (r.ok) {
+      if (r.skipped) {
+        acc.jobsSkipped += 1;
+      } else if (r.ok) {
         acc.upserted += r.upserted ?? 0;
         acc.decorationPoCount += r.decorationPoCount ?? 0;
         acc.apparelPoCount += r.apparelPoCount ?? 0;
@@ -121,6 +143,7 @@ async function handle(req: Request) {
     },
     {
       jobsOk: 0,
+      jobsSkipped: 0,
       jobsFailed: 0,
       upserted: 0,
       decorationPoCount: 0,
@@ -128,11 +151,15 @@ async function handle(req: Request) {
     },
   );
 
+  // Strip the skipped runs from the payload — they're noise, the count
+  // is in `totals.jobsSkipped` if you need it.
+  const visibleRuns = runs.filter((r) => !r.skipped);
+
   return NextResponse.json({
     ok: true,
     jobsConsidered: jobIds.length,
     totals,
-    runs,
+    runs: visibleRuns,
     totalMs: Date.now() - started,
   });
 }
