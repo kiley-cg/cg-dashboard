@@ -6,8 +6,8 @@ import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
 import { hasRoleAccess } from "@/lib/roles";
 import { SyncoreError } from "@/lib/syncore/client";
+import { WebUiError } from "@/lib/syncore/webui";
 import { postPurchaseOrderManually } from "@/lib/syncore/orders";
-import type { SyncorePurchaseOrder } from "@/lib/syncore/types";
 
 export type ActionResult =
   | { ok: true }
@@ -41,11 +41,6 @@ async function authorize(): Promise<{
   };
 }
 
-function todayInPacific(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
-  }).format(new Date());
-}
 
 /**
  * Drop a decoration PO onto a specific day. Upserts po_schedule_state
@@ -170,15 +165,10 @@ export async function closeSyncorePo(
     return { ok: false, error: "Missing poId" };
   }
 
-  // Look up the PO's parent job id + raw snapshot. Syncore's PUT is
-  // replace-the-resource semantics; we need ship_to, in_hand_date, and
-  // friends from the current PO body or the status change silently
-  // no-ops.
+  // Look up the PO's parent job id — the v1 web UI close endpoint needs
+  // both ids in the path.
   const mirror = await db
-    .select({
-      jobId: schema.productionPoMirror.syncoreJobId,
-      raw: schema.productionPoMirror.raw,
-    })
+    .select({ jobId: schema.productionPoMirror.syncoreJobId })
     .from(schema.productionPoMirror)
     .where(eq(schema.productionPoMirror.poId, poId))
     .limit(1);
@@ -186,13 +176,6 @@ export async function closeSyncorePo(
     return { ok: false, error: `PO ${poId} is not in the local mirror` };
   }
   const jobId = mirror[0].jobId;
-  const current = mirror[0].raw as SyncorePurchaseOrder | null;
-  if (!current) {
-    return {
-      ok: false,
-      error: `PO ${poId} has no mirrored body — re-run the sync cron`,
-    };
-  }
 
   // Guardrails: only close from done, and only once.
   const state = await db
@@ -212,20 +195,14 @@ export async function closeSyncorePo(
   }
 
   try {
-    // Tag the close with WHO closed it and WHEN — Syncore's audit log
-    // doesn't otherwise capture this for in-house decoration POs. The
-    // signed-in user's name is the natural "invoice number" since
-    // there's no actual supplier invoice for in-house work; today's
-    // Pacific date is the invoice date.
-    await postPurchaseOrderManually(jobId, poId, current, {
+    // Tag the close with WHO closed it. The signed-in user's name is
+    // the natural "invoice number" for an in-house PO; Syncore stamps
+    // the dates server-side on the auto-transition.
+    await postPurchaseOrderManually(jobId, poId, {
       invoiceNumber: userName ?? "In-house production",
-      invoiceDate: todayInPacific(),
     });
   } catch (err) {
-    if (err instanceof SyncoreError) {
-      // Surface the body if it's a structured error message — typical
-      // Syncore validation errors look like:
-      //   { errors: { field: ["..."] }, title: "Bad Request", ... }
+    if (err instanceof SyncoreError || err instanceof WebUiError) {
       const detail =
         typeof err.body === "object" && err.body !== null
           ? JSON.stringify(err.body)
