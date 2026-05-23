@@ -94,77 +94,75 @@ async function handle(req: Request) {
     );
   }
 
-  // Step 1: GET login page, extract CSRF token, capture cookies.
-  let csrfToken: string | null = null;
+  // Step 1: GET /Login.asp — classic ASP login form. Inspect for the
+  // input names + any token field.
   try {
-    const res = await fetch(`${US_BASE}/Account/Login`, {
-      redirect: "manual",
-    });
+    const res = await fetch(`${US_BASE}/Login.asp`, { redirect: "manual" });
     mergeSetCookies(res.headers, jar);
     const html = await res.text();
-    const match =
-      html.match(/name="__RequestVerificationToken"[^>]*value="([^"]+)"/) ||
-      html.match(
-        /<input[^>]+name="__RequestVerificationToken"[^>]+value="([^"]+)"/,
-      );
-    csrfToken = match ? match[1] : null;
+    // Capture every <input name="..."> for the form. Useful to see what
+    // we need to POST.
+    const inputNames = Array.from(
+      html.matchAll(/<input[^>]+name=["']([^"']+)["']/g),
+    ).map((m) => m[1]);
+    // Capture <form action="...">
+    const formAction = html.match(/<form[^>]+action=["']([^"']+)["']/i)?.[1];
     steps.push({
-      label: "GET /Account/Login",
-      url: `${US_BASE}/Account/Login`,
+      label: "GET /Login.asp",
+      url: `${US_BASE}/Login.asp`,
       method: "GET",
       status: res.status,
       contentType: res.headers.get("content-type") ?? undefined,
       cookieKeys: Array.from(jar.keys()),
-      csrfTokenFound: !!csrfToken,
-      bodyPreview: html.slice(0, 200),
+      bodyPreview: `formAction=${formAction ?? "?"}; inputs=[${Array.from(new Set(inputNames)).join(", ")}]`,
     });
   } catch (err) {
     steps.push({
-      label: "GET /Account/Login",
-      url: `${US_BASE}/Account/Login`,
+      label: "GET /Login.asp",
+      url: `${US_BASE}/Login.asp`,
       method: "GET",
       error: err instanceof Error ? err.message : String(err),
     });
   }
 
-  // Step 2: POST credentials.
-  if (csrfToken) {
-    try {
-      const body = new URLSearchParams({
-        Email: username,
-        Password: password,
-        __RequestVerificationToken: csrfToken,
-      });
-      const res = await fetch(`${US_BASE}/Account/Login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Cookie: cookieHeader(jar),
-        },
-        body: body.toString(),
-        redirect: "manual",
-      });
-      mergeSetCookies(res.headers, jar);
-      const location = res.headers.get("location");
-      const text = await res.text().catch(() => "");
-      steps.push({
-        label: "POST /Account/Login",
-        url: `${US_BASE}/Account/Login`,
-        method: "POST",
-        status: res.status,
-        contentType: res.headers.get("content-type") ?? undefined,
-        location,
-        cookieKeys: Array.from(jar.keys()),
-        bodyPreview: text.slice(0, 300),
-      });
-    } catch (err) {
-      steps.push({
-        label: "POST /Account/Login",
-        url: `${US_BASE}/Account/Login`,
-        method: "POST",
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  // Step 2: POST credentials with classic-ASP-style form. The exact
+  // input names will surface from step 1 — try the most common
+  // (UserName / Password / Login) as a first pass.
+  try {
+    const body = new URLSearchParams({
+      UserName: username,
+      Password: password,
+      Login: "Login",
+    });
+    const res = await fetch(`${US_BASE}/Login.asp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader(jar),
+      },
+      body: body.toString(),
+      redirect: "manual",
+    });
+    mergeSetCookies(res.headers, jar);
+    const location = res.headers.get("location");
+    const text = await res.text().catch(() => "");
+    steps.push({
+      label: "POST /Login.asp (UserName/Password/Login)",
+      url: `${US_BASE}/Login.asp`,
+      method: "POST",
+      status: res.status,
+      contentType: res.headers.get("content-type") ?? undefined,
+      location,
+      cookieKeys: Array.from(jar.keys()),
+      bodyPreview: text.slice(0, 300),
+    });
+  } catch (err) {
+    steps.push({
+      label: "POST /Login.asp",
+      url: `${US_BASE}/Login.asp`,
+      method: "POST",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // Step 3: GET receivingMemo with PO id, see what comes back. Look in
