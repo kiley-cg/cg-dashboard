@@ -224,3 +224,40 @@ export async function webuiFetch<T = unknown>(
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
+
+export interface WebUiRawResponse {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+}
+
+// Probe-only escape hatch: runs an authenticated request through the cached
+// session and returns the raw status/headers/body without parsing or retry
+// logic. Use this for endpoint discovery (OPTIONS, unusual methods,
+// inspecting Allow headers); production code should use `webuiFetch`.
+export async function webuiFetchRaw(
+  path: string,
+  init: { method?: string; searchParams?: WebUiSearchParams } = {},
+): Promise<WebUiRawResponse> {
+  const url = new URL(`${WEB_BASE}${path.startsWith("/") ? path : `/${path}`}`);
+  appendParams(url, init.searchParams);
+
+  const session = await getSession();
+  const res = await fetch(url, {
+    method: init.method ?? "GET",
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      Cookie: session.cookie,
+    },
+    cache: "no-store",
+    redirect: "manual",
+  });
+
+  const headers: Record<string, string> = {};
+  res.headers.forEach((v, k) => {
+    headers[k] = v;
+  });
+  const body = await res.text().catch(() => "");
+  return { status: res.status, headers, body };
+}
