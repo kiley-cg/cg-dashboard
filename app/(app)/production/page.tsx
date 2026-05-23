@@ -134,7 +134,15 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             What runs today
           </h1>
         </div>
-        <NotificationToggle />
+        <div className="flex items-center gap-3">
+          <Link
+            href="/production/receiving"
+            className="text-[13px] text-cg-teal font-semibold hover:underline"
+          >
+            Receiving →
+          </Link>
+          <NotificationToggle />
+        </div>
       </header>
 
       <div className="px-8 pt-4 flex flex-wrap items-end gap-3">
