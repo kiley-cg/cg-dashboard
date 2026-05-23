@@ -237,19 +237,36 @@ export interface WebUiRawResponse {
 // inspecting Allow headers); production code should use `webuiFetch`.
 export async function webuiFetchRaw(
   path: string,
-  init: { method?: string; searchParams?: WebUiSearchParams } = {},
+  init: {
+    method?: string;
+    searchParams?: WebUiSearchParams;
+    // Probes need to experiment with the exact header set Syncore expects.
+    // `headers` overrides the defaults; pass an empty value to delete a
+    // default header.
+    headers?: Record<string, string | undefined>;
+  } = {},
 ): Promise<WebUiRawResponse> {
   const url = new URL(`${WEB_BASE}${path.startsWith("/") ? path : `/${path}`}`);
   appendParams(url, init.searchParams);
 
   const session = await getSession();
+  const defaultHeaders: Record<string, string> = {
+    Accept: "application/json",
+    "X-Requested-With": "XMLHttpRequest",
+    Cookie: session.cookie,
+  };
+  if (init.headers) {
+    for (const [k, v] of Object.entries(init.headers)) {
+      if (v === undefined || v === "") {
+        delete defaultHeaders[k];
+      } else {
+        defaultHeaders[k] = v;
+      }
+    }
+  }
   const res = await fetch(url, {
     method: init.method ?? "GET",
-    headers: {
-      Accept: "application/json",
-      "X-Requested-With": "XMLHttpRequest",
-      Cookie: session.cookie,
-    },
+    headers: defaultHeaders,
     cache: "no-store",
     redirect: "manual",
   });
