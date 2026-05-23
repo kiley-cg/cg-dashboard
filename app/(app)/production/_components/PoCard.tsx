@@ -20,11 +20,14 @@ export interface DayOption {
   label: string;
 }
 
-const DEPT_CHIP: Record<Department, { label: string; color: string }> = {
-  embroidery: { label: "EMB", color: "#0F6E56" },
-  transfers: { label: "TRN", color: "#8A5A2B" },
-  fulfillment: { label: "FUL", color: "#3B6FB0" },
-  other: { label: "OTH", color: "#6B6356" },
+const DEPT_CHIP: Record<
+  Department,
+  { label: string; color: string; tint: string }
+> = {
+  embroidery: { label: "EMB", color: "#0F6E56", tint: "#EBF4EF" },
+  transfers: { label: "TRN", color: "#8A5A2B", tint: "#F7EFE3" },
+  fulfillment: { label: "FUL", color: "#3B6FB0", tint: "#EAF0F8" },
+  other: { label: "OTH", color: "#6B6356", tint: "#FCFBF7" },
 };
 
 interface RawShipTo {
@@ -42,10 +45,17 @@ function shipToBusinessName(po: MirroredPo): string | null {
 }
 
 function csrInstructionsSnippet(po: MirroredPo): string | null {
+  // CSRs put multiple labeled sections in csr_instructions_from_so
+  // ("For CSR: ... For Production: ... For Shipping: ..."). Kristen only
+  // wants the "For Production" section surfaced on the floor — anything
+  // else is noise. If no such section exists, hide the box entirely.
   const raw = po.raw as RawShape | null;
-  const s = raw?.csr_instructions_from_so?.trim();
+  const s = raw?.csr_instructions_from_so;
   if (!s) return null;
-  return s.length > 120 ? s.slice(0, 117) + "…" : s;
+  const match = s.match(/For\s+Production:?\s*([\s\S]*?)(?=\n\s*For\s+\w+\s*:|$)/i);
+  const section = match?.[1]?.trim();
+  if (!section) return null;
+  return section.length > 150 ? section.slice(0, 147) + "…" : section;
 }
 
 interface Props {
@@ -86,8 +96,13 @@ export function PoCard({
 
   return (
     <article
+      style={{
+        borderLeftColor: chip.color,
+        borderLeftWidth: 6,
+        backgroundColor: chip.tint,
+      }}
       className={[
-        "flex gap-3.5 p-4 border border-[#E3DFD3] rounded-card bg-[#FCFBF7] hover:-translate-y-px hover:shadow-md transition",
+        "flex gap-3.5 p-4 pl-[11px] border border-[#E3DFD3] rounded-card hover:-translate-y-px hover:shadow-md transition",
         isDone ? "opacity-60" : "",
       ].join(" ")}
     >
