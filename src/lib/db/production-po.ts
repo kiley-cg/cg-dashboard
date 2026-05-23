@@ -110,6 +110,9 @@ export interface DecorationPoView {
   // status" badge on the card. Empty array if this is a job with no apparel
   // purchase (e.g. customer-supplied garments).
   apparelSiblings: MirroredPo[];
+  // Total tracking entries across all apparel siblings for the same job —
+  // surfaced on the card so the floor sees how many shipments are en route.
+  inboundTrackingCount: number;
 }
 
 /**
@@ -164,11 +167,35 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
     siblingsByJob.set(s.syncoreJobId, arr);
   }
 
-  return decorationPos.map((po) => ({
-    po,
-    state: stateByPoId.get(po.poId) ?? null,
-    apparelSiblings: siblingsByJob.get(po.syncoreJobId) ?? [],
-  }));
+  // Aggregate tracking counts across all sibling POs in one query so the
+  // card doesn't fan out N queries per render.
+  const trackingCountByPoId = new Map<string, number>();
+  const siblingPoIds = siblings.map((s) => s.poId);
+  if (siblingPoIds.length > 0) {
+    const rows = await db
+      .select({
+        poId: schema.poTracking.poId,
+        count: sql<number>`COUNT(*)::int`,
+      })
+      .from(schema.poTracking)
+      .where(inArray(schema.poTracking.poId, siblingPoIds))
+      .groupBy(schema.poTracking.poId);
+    for (const r of rows) trackingCountByPoId.set(r.poId, Number(r.count));
+  }
+
+  return decorationPos.map((po) => {
+    const jobSiblings = siblingsByJob.get(po.syncoreJobId) ?? [];
+    const inboundTrackingCount = jobSiblings.reduce(
+      (sum, s) => sum + (trackingCountByPoId.get(s.poId) ?? 0),
+      0,
+    );
+    return {
+      po,
+      state: stateByPoId.get(po.poId) ?? null,
+      apparelSiblings: jobSiblings,
+      inboundTrackingCount,
+    };
+  });
 }
 
 /**
