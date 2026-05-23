@@ -43,6 +43,13 @@
       "when": 1779469291233,
       "tag": "0005_production_po_v2",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779494755542,
+      "tag": "0006_inbound_receiving",
+      "breakpoints": true
     }
   ]
 }

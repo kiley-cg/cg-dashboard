@@ -318,3 +318,52 @@ export const jobVerificationRecord = pgTable(
     ),
   }),
 );
+
+// Inbound apparel-PO receiving state. One row per Syncore PO id (apparel
+// vendors only — SanMar, S&S, etc., not the in-house decoration POs).
+// "Received" here is dashboard-local: when set, the floor sees the PO
+// as in-hand and decoration POs that depend on it flip to ready. The
+// corresponding flip in Syncore's v1 receiving memo lands in Phase 4.2.
+export const poInboundState = pgTable("po_inbound_state", {
+  poId: text("po_id").primaryKey(),
+  receivedAt: timestamp("received_at", { mode: "date" }),
+  receivedByUserId: text("received_by_user_id").references(() => users.id),
+  // Stamped once the v1 receiving-memo webui writeback succeeds. Phase
+  // 4.1 leaves it null; Phase 4.2 will populate.
+  syncoreMemoUpdatedAt: timestamp("syncore_memo_updated_at", {
+    mode: "date",
+  }),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+
+// Inbound tracking numbers for apparel POs. One row per tracking number;
+// a PO can carry several when the vendor splits the shipment.
+//
+// `source` is "manual" (rep entered it from a vendor email) or "api"
+// (Phase 5 auto-poll from SanMar/S&S/Cutter & Buck). `status` + `eta` +
+// `last_polled_at` are populated by the carrier poll once it's wired.
+export const poTracking = pgTable(
+  "po_tracking",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    poId: text("po_id").notNull(),
+    carrier: text("carrier").notNull(),
+    trackingNumber: text("tracking_number").notNull(),
+    source: text("source").notNull().default("manual"),
+    status: text("status"),
+    eta: text("eta"), // YYYY-MM-DD
+    lastPolledAt: timestamp("last_polled_at", { mode: "date" }),
+    enteredByUserId: text("entered_by_user_id").references(() => users.id),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    idxPoId: index("po_tracking_po_id_idx").on(t.poId),
+  }),
+);
