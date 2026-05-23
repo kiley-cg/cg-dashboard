@@ -86,8 +86,9 @@ export function PoCard({
 
   return (
     <article
+      style={{ borderLeftColor: chip.color, borderLeftWidth: 4 }}
       className={[
-        "flex gap-3.5 p-4 border border-[#E3DFD3] rounded-card bg-[#FCFBF7] hover:-translate-y-px hover:shadow-md transition",
+        "flex gap-3.5 p-4 pl-[13px] border border-[#E3DFD3] rounded-card bg-[#FCFBF7] hover:-translate-y-px hover:shadow-md transition",
         isDone ? "opacity-60" : "",
       ].join(" ")}
     >
