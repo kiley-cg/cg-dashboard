@@ -1,25 +1,21 @@
-import { notFound } from "next/navigation";
-import Link from "next/link";
-import { auth } from "@/lib/auth";
-import { hasRoleAccess } from "@/lib/roles";
+// Inbound apparel tab on the production page. Renders the receiving
+// list — POs shipping to Color Graphics that production is waiting on —
+// with manual tracking entry and a local "mark received" toggle.
+//
+// Same actions are intended to surface on a future CSR dashboard
+// receiving section (with cgOnly: false so CSRs see every job's apparel,
+// not just CG-bound). Until then, this tab is the only home.
+
 import {
   listInboundPos,
   type InboundPoView,
   type TrackingEntry,
 } from "@/lib/db/receiving";
 import { getCustomerDisplayMap } from "@/lib/db/production-po";
-import { TrackingForm } from "./_components/TrackingForm";
-import { ReceiptToggle } from "./_components/ReceiptToggle";
-import { DeleteTrackingButton } from "./_components/DeleteTrackingButton";
+import { TrackingForm } from "./TrackingForm";
+import { ReceiptToggle } from "./ReceiptToggle";
+import { DeleteTrackingButton } from "./DeleteTrackingButton";
 
-export const dynamic = "force-dynamic";
-export const metadata = { title: "Receiving · Color Graphics" };
-
-// Same v1 deep-link pattern used by /dashboard's CSR job lists. Lands on
-// the job's Syncore page; from there the user can hop into the PO and
-// its receiving memo. We tried /porder/receivingMemo.asp directly but
-// Syncore requires MemoId on that page and we don't have it until
-// Phase 4.2 wires the discovery.
 const SYNCORE_JOB_DEEP_LINK = "https://www.ateasesystems.net/Job/Details";
 
 interface RawShipTo {
@@ -42,25 +38,15 @@ function customerLabel(
   return `Job ${view.po.syncoreJobId}`;
 }
 
-function syncoreJobUrl(po: InboundPoView["po"]): string {
-  return `${SYNCORE_JOB_DEEP_LINK}/${po.syncoreJobId}`;
-}
-
-export default async function ReceivingPage() {
-  const session = await auth();
-  const allowed = await hasRoleAccess({
-    email: session?.user?.email,
-    userId: session?.user?.id,
-    required: "production",
-  });
-  if (!allowed) notFound();
-
-  const inbound = await listInboundPos();
+export async function InboundTab() {
+  // cgOnly: true filters to apparel shipping to Color Graphics — Kristen's
+  // actual receiving load. Contract-decorator destinations live in the
+  // future CSR dashboard view that passes cgOnly: false.
+  const inbound = await listInboundPos({ cgOnly: true });
   const customerMap = await getCustomerDisplayMap({
     jobIds: Array.from(new Set(inbound.map((v) => v.po.syncoreJobId))),
   });
 
-  // Group by job so multiple inbound POs for the same job render together.
   const byJob = new Map<string, InboundPoView[]>();
   for (const v of inbound) {
     const list = byJob.get(v.po.syncoreJobId) ?? [];
@@ -68,7 +54,6 @@ export default async function ReceivingPage() {
     byJob.set(v.po.syncoreJobId, list);
   }
 
-  // Sort jobs by earliest in_hand_date among their POs.
   const jobsSorted = Array.from(byJob.entries()).sort(([, a], [, b]) => {
     const ea = a.map((v) => v.po.inHandDate ?? "9999-12-31").sort()[0];
     const eb = b.map((v) => v.po.inHandDate ?? "9999-12-31").sort()[0];
@@ -79,52 +64,33 @@ export default async function ReceivingPage() {
   const totalReceived = inbound.length - totalOpen;
 
   return (
-    <div className="min-h-screen bg-[#F7F5EF] text-[#1C2B27]">
-      <header className="flex flex-wrap items-end justify-between gap-3 px-8 pt-7 pb-4 border-b-2 border-[#1C2B27]">
-        <div>
-          <p className="text-[11px] tracking-[.14em] uppercase font-bold text-cg-teal">
-            Color Graphics · Production · Receiving
-          </p>
-          <h1 className="text-[34px] font-medium tracking-tight mt-1 font-serif">
-            Inbound apparel
-          </h1>
-        </div>
-        <div className="flex gap-3 text-right">
+    <section className="mx-8 my-6 flex flex-col gap-5">
+      <div className="flex items-end justify-between gap-3">
+        <p className="text-[12px] text-[#5A5346] leading-relaxed">
+          Apparel coming in to Color Graphics. Contract-decorator
+          destinations live on the (future) CSR dashboard.
+        </p>
+        <div className="flex gap-4">
           <Stat label="Awaiting" value={totalOpen} tone="open" />
           <Stat label="Received" value={totalReceived} tone="done" />
-          <Link
-            href="/production"
-            className="self-center text-[13px] text-cg-teal font-semibold hover:underline"
-          >
-            ← Schedule
-          </Link>
         </div>
-      </header>
+      </div>
 
-      <main className="mx-8 my-6 flex flex-col gap-5">
-        {jobsSorted.length === 0 ? (
-          <div className="bg-white border border-[#E3DFD3] rounded-card p-8 text-center text-[#9A917F] italic">
-            No inbound apparel POs awaiting receipt. Either the mirror cron
-            hasn&apos;t run, or every PO has been received.
-          </div>
-        ) : (
-          jobsSorted.map(([jobId, views]) => (
-            <JobBlock
-              key={jobId}
-              jobId={jobId}
-              views={views}
-              customer={customerLabel(views[0], customerMap)}
-            />
-          ))
-        )}
-      </main>
-
-      <footer className="mx-8 mb-6 text-[11.5px] text-[#9A917F] leading-relaxed">
-        Phase 4.1 · local receiving state + manual tracking. Syncore
-        receiving-memo writeback (Phase 4.2) and SanMar/S&amp;S/Cutter
-        &amp; Buck auto-poll (Phase 5) coming next.
-      </footer>
-    </div>
+      {jobsSorted.length === 0 ? (
+        <div className="bg-white border border-[#E3DFD3] rounded-card p-8 text-center text-[#9A917F] italic">
+          No inbound apparel POs awaiting receipt right now.
+        </div>
+      ) : (
+        jobsSorted.map(([jobId, views]) => (
+          <JobBlock
+            key={jobId}
+            jobId={jobId}
+            views={views}
+            customer={customerLabel(views[0], customerMap)}
+          />
+        ))
+      )}
+    </section>
   );
 }
 
@@ -138,7 +104,7 @@ function Stat({
   tone: "open" | "done";
 }) {
   return (
-    <div>
+    <div className="text-right">
       <span className="block text-[10px] tracking-[.1em] uppercase text-[#9A917F]">
         {label}
       </span>
@@ -171,6 +137,14 @@ function JobBlock({
         <span className="text-[11.5px] text-[#9A917F]">
           {views.length} PO{views.length === 1 ? "" : "s"}
         </span>
+        <a
+          href={`${SYNCORE_JOB_DEEP_LINK}/${jobId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto text-[12px] text-cg-teal hover:underline font-semibold"
+        >
+          Open job in Syncore →
+        </a>
       </div>
       {views.map((v) => (
         <InboundPoRow key={v.po.poId} view={v} />
@@ -219,14 +193,6 @@ function InboundPoRow({ view }: { view: InboundPoView }) {
             <b>In-hand</b> {po.inHandDate}
           </span>
         )}
-        <a
-          href={syncoreJobUrl(po)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-cg-teal hover:underline font-semibold ml-auto"
-        >
-          Open job in Syncore →
-        </a>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mt-1">

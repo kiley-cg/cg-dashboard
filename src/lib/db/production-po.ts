@@ -9,6 +9,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "./client";
 import {
   IN_HOUSE_SUPPLIER_CLASS,
+  isShippingToCg,
   stitchCountFromPo,
   totalQuantity,
 } from "@/lib/syncore/production";
@@ -160,8 +161,14 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
   const stateByPoId = new Map<string, PoScheduleState>();
   for (const s of states) stateByPoId.set(s.poId, s);
 
+  // Only siblings coming TO CG matter for Kristen's planning — apparel
+  // shipping to a contract decorator is somebody else's queue. Filter
+  // here so the badge counts + tracking aggregate stay scoped to her
+  // actual receiving load.
+  const cgSiblings = siblings.filter((s) => isShippingToCg(s.raw));
+
   const siblingsByJob = new Map<string, MirroredPo[]>();
-  for (const s of siblings) {
+  for (const s of cgSiblings) {
     const arr = siblingsByJob.get(s.syncoreJobId) ?? [];
     arr.push(s);
     siblingsByJob.set(s.syncoreJobId, arr);
@@ -170,7 +177,7 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
   // Aggregate tracking counts across all sibling POs in one query so the
   // card doesn't fan out N queries per render.
   const trackingCountByPoId = new Map<string, number>();
-  const siblingPoIds = siblings.map((s) => s.poId);
+  const siblingPoIds = cgSiblings.map((s) => s.poId);
   if (siblingPoIds.length > 0) {
     const rows = await db
       .select({

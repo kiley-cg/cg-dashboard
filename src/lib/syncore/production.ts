@@ -96,6 +96,24 @@ export function stitchCountFromPo(
 }
 
 /**
+ * True when the PO's `ship_to.business_name` identifies Color Graphics as
+ * the recipient — i.e., the apparel is coming here to be decorated, not
+ * to a contract decorator. Used to filter the Inbound view to Kristen's
+ * actual receiving load.
+ *
+ * Permissive match: lowercase, contains "color graphics". Catches "Color
+ * Graphics", "Color Graphics, Inc.", etc., without misclassifying a
+ * different vendor that happens to start with similar words.
+ */
+export function isShippingToCg(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const shipTo = (raw as { ship_to?: { business_name?: string | null } | null })
+    .ship_to;
+  const name = shipTo?.business_name?.trim().toLowerCase() ?? "";
+  return name.includes("color graphics");
+}
+
+/**
  * Best-effort total quantity from a PO's line items. POs in Syncore can be
  * either flat (one line per SKU with quantity) or nested like sales orders
  * (Asi → Color → Size, with quantity only on Size leaves). Try flat first,

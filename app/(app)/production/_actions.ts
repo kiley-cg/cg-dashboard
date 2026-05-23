@@ -8,6 +8,12 @@ import { hasRoleAccess } from "@/lib/roles";
 import { SyncoreError } from "@/lib/syncore/client";
 import { WebUiError } from "@/lib/syncore/webui";
 import { postPurchaseOrderManually } from "@/lib/syncore/orders";
+import {
+  addTracking,
+  deleteTracking,
+  markReceived,
+  unmarkReceived,
+} from "@/lib/db/receiving";
 
 export type ActionResult =
   | { ok: true }
@@ -227,4 +233,69 @@ export async function closeSyncorePo(
 
   revalidatePath("/production");
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Inbound receiving — tracking + receipt-state.
+// ---------------------------------------------------------------------------
+//
+// Mounted on the /production Inbound tab. Eventually we'll surface the
+// same actions on a future CSR dashboard receiving section so CSRs can
+// chase down tracking even when Kristen isn't watching. Until then,
+// production role is fine.
+
+const CARRIERS = ["UPS", "FedEx", "USPS", "DHL", "Other"] as const;
+function isCarrier(value: string): boolean {
+  return (CARRIERS as readonly string[]).includes(value);
+}
+
+export async function addTrackingAction(formData: FormData): Promise<void> {
+  const { userId } = await authorize();
+  const poId = formData.get("poId");
+  const carrier = formData.get("carrier");
+  const trackingNumber = formData.get("trackingNumber");
+  if (typeof poId !== "string" || !poId) throw new Error("Missing poId");
+  if (typeof carrier !== "string" || !isCarrier(carrier)) {
+    throw new Error(`Invalid carrier: ${String(carrier)}`);
+  }
+  if (typeof trackingNumber !== "string" || !trackingNumber.trim()) {
+    throw new Error("Tracking number is required");
+  }
+  await addTracking({
+    poId,
+    carrier,
+    trackingNumber: trackingNumber.trim(),
+    userId,
+  });
+  revalidatePath("/production");
+}
+
+export async function deleteTrackingAction(
+  formData: FormData,
+): Promise<void> {
+  await authorize();
+  const trackingId = formData.get("trackingId");
+  if (typeof trackingId !== "string" || !trackingId) {
+    throw new Error("Missing trackingId");
+  }
+  await deleteTracking(trackingId);
+  revalidatePath("/production");
+}
+
+export async function markReceivedAction(formData: FormData): Promise<void> {
+  const { userId } = await authorize();
+  const poId = formData.get("poId");
+  if (typeof poId !== "string" || !poId) throw new Error("Missing poId");
+  await markReceived({ poId, userId });
+  revalidatePath("/production");
+}
+
+export async function unmarkReceivedAction(
+  formData: FormData,
+): Promise<void> {
+  await authorize();
+  const poId = formData.get("poId");
+  if (typeof poId !== "string" || !poId) throw new Error("Missing poId");
+  await unmarkReceived(poId);
+  revalidatePath("/production");
 }

@@ -23,16 +23,20 @@ import { PoCard, type DayOption } from "./_components/PoCard";
 import { HuddleSection } from "./_components/HuddleSection";
 import { NotificationToggle } from "./_components/NotificationToggle";
 import { WeekTabs } from "./_components/WeekTabs";
+import { InboundTab } from "./_components/InboundTab";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
   title: "What runs today · Color Graphics",
 };
 
+type TabKey = "schedule" | "inbound";
+
 interface PageProps {
   searchParams: Promise<{
     day?: string;
     week?: string;
+    tab?: string;
   }>;
 }
 
@@ -62,6 +66,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
 
   const today = pacificIsoDate();
   const params = await searchParams;
+  const activeTab: TabKey = params.tab === "inbound" ? "inbound" : "schedule";
 
   // Week anchor (Monday). `?week=YYYY-MM-DD` overrides; default = this week.
   const weekStart = params.week
@@ -134,96 +139,73 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             What runs today
           </h1>
         </div>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/production/receiving"
-            className="text-[13px] text-cg-teal font-semibold hover:underline"
-          >
-            Receiving →
-          </Link>
-          <NotificationToggle />
-        </div>
+        <NotificationToggle />
       </header>
 
-      <div className="px-8 pt-4 flex flex-wrap items-end gap-3">
-        <WeekArrows
-          prevHref={`/production?week=${prevWeek}`}
-          nextHref={`/production?week=${nextWeek}`}
-          weekStart={weekStart}
+      {/* Top-level tab strip: Schedule (Kristen's day-by-day decoration
+          plan) and Inbound (apparel shipping to CG that she's waiting on).
+          State carried as ?tab=inbound; default empty = schedule. */}
+      <div className="px-8 pt-5 border-b border-[#E3DFD3] flex gap-1">
+        <TopTab
+          href="/production"
+          label="Schedule"
+          active={activeTab === "schedule"}
         />
-        <WeekTabs
-          days={days}
-          activeDay={activeDay}
-          weekStart={weekStart}
-          countByDay={countByDay}
-          today={today}
+        <TopTab
+          href="/production?tab=inbound"
+          label="Inbound"
+          active={activeTab === "inbound"}
         />
-        <div className="ml-auto text-right">
-          <span className="block text-[10px] tracking-[.1em] uppercase text-[#9A917F]">
-            Open decoration POs
-          </span>
-          <strong className="text-xl font-serif">{decorationPos.length}</strong>
-        </div>
       </div>
 
-      {/* Scheduled section — current day's cards */}
-      <main className="mx-8 bg-white border border-[#E3DFD3] rounded-tr-card rounded-b-card p-4 flex flex-col gap-3">
-        {dayItems.length === 0 ? (
-          <div className="py-10 text-center text-[#9A917F] italic">
-            Nothing scheduled for this day yet. Use the Schedule dropdown
-            on any card in the Unscheduled queue below to place it on this
-            day.
+      {activeTab === "inbound" ? (
+        <InboundTab />
+      ) : (
+        <>
+          <div className="px-8 pt-4 flex flex-wrap items-end gap-3">
+            <WeekArrows
+              prevHref={`/production?week=${prevWeek}`}
+              nextHref={`/production?week=${nextWeek}`}
+              weekStart={weekStart}
+            />
+            <WeekTabs
+              days={days}
+              activeDay={activeDay}
+              weekStart={weekStart}
+              countByDay={countByDay}
+              today={today}
+            />
+            <div className="ml-auto text-right">
+              <span className="block text-[10px] tracking-[.1em] uppercase text-[#9A917F]">
+                Open decoration POs
+              </span>
+              <strong className="text-xl font-serif">
+                {decorationPos.length}
+              </strong>
+            </div>
           </div>
-        ) : (
-          DEPT_ORDER.flatMap((dept) => {
-            const items = dayItems.filter(
-              (v) => departmentForSupplier(v.po.supplierName) === dept,
-            );
-            if (items.length === 0) return [];
-            return [
-              <DeptHeader key={`h-${dept}`} dept={dept} count={items.length} />,
-              ...items.map((v) => (
-                <PoCard
-                  key={v.po.poId}
-                  po={v.po}
-                  state={v.state}
-                  apparelSiblings={v.apparelSiblings}
-                  inboundTrackingCount={v.inboundTrackingCount}
-                  department={dept}
-                  customer={customerMap.get(v.po.syncoreJobId) ?? null}
-                  weekDays={weekDayOptions}
-                />
-              )),
-            ];
-          })
-        )}
 
-        <HuddleSection activeDay={activeDay} />
-      </main>
-
-      {/* Unscheduled queue */}
-      <section className="mx-8 mt-6 mb-8">
-        <h2 className="text-[12px] tracking-[.14em] uppercase font-bold text-cg-teal mb-2">
-          Unscheduled · {unscheduled.length} PO
-          {unscheduled.length === 1 ? "" : "s"}
-        </h2>
-        {unscheduled.length === 0 ? (
-          <div className="bg-white border border-[#E3DFD3] rounded-card p-6 text-center text-[#9A917F] italic">
-            No open decoration POs. Either the mirror cron hasn&apos;t run yet,
-            or everything in production is done.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {DEPT_ORDER.map((dept) => {
-              const items = unscheduledByDept.get(dept) ?? [];
-              if (items.length === 0) return null;
-              return (
-                <div
-                  key={dept}
-                  className="bg-white border border-[#E3DFD3] rounded-card p-3 flex flex-col gap-3"
-                >
-                  <DeptHeader dept={dept} count={items.length} />
-                  {items.map((v) => (
+          {/* Scheduled section — current day's cards */}
+          <main className="mx-8 bg-white border border-[#E3DFD3] rounded-tr-card rounded-b-card p-4 flex flex-col gap-3">
+            {dayItems.length === 0 ? (
+              <div className="py-10 text-center text-[#9A917F] italic">
+                Nothing scheduled for this day yet. Use the Schedule
+                dropdown on any card in the Unscheduled queue below to
+                place it on this day.
+              </div>
+            ) : (
+              DEPT_ORDER.flatMap((dept) => {
+                const items = dayItems.filter(
+                  (v) => departmentForSupplier(v.po.supplierName) === dept,
+                );
+                if (items.length === 0) return [];
+                return [
+                  <DeptHeader
+                    key={`h-${dept}`}
+                    dept={dept}
+                    count={items.length}
+                  />,
+                  ...items.map((v) => (
                     <PoCard
                       key={v.po.poId}
                       po={v.po}
@@ -236,20 +218,66 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                       }
                       weekDays={weekDayOptions}
                     />
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
+                  )),
+                ];
+              })
+            )}
+
+            <HuddleSection activeDay={activeDay} />
+          </main>
+
+          {/* Unscheduled queue */}
+          <section className="mx-8 mt-6 mb-8">
+            <h2 className="text-[12px] tracking-[.14em] uppercase font-bold text-cg-teal mb-2">
+              Unscheduled · {unscheduled.length} PO
+              {unscheduled.length === 1 ? "" : "s"}
+            </h2>
+            {unscheduled.length === 0 ? (
+              <div className="bg-white border border-[#E3DFD3] rounded-card p-6 text-center text-[#9A917F] italic">
+                No open decoration POs. Either the mirror cron
+                hasn&apos;t run yet, or everything in production is done.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {DEPT_ORDER.map((dept) => {
+                  const items = unscheduledByDept.get(dept) ?? [];
+                  if (items.length === 0) return null;
+                  return (
+                    <div
+                      key={dept}
+                      className="bg-white border border-[#E3DFD3] rounded-card p-3 flex flex-col gap-3"
+                    >
+                      <DeptHeader dept={dept} count={items.length} />
+                      {items.map((v) => (
+                        <PoCard
+                          key={v.po.poId}
+                          po={v.po}
+                          state={v.state}
+                          apparelSiblings={v.apparelSiblings}
+                          inboundTrackingCount={v.inboundTrackingCount}
+                          department={dept}
+                          customer={
+                            customerMap.get(v.po.syncoreJobId) ?? null
+                          }
+                          weekDays={weekDayOptions}
+                        />
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </>
+      )}
 
       <footer className="mx-8 mb-6 text-[11.5px] text-[#9A917F] leading-relaxed">
-        v2 PO mirror + scheduling + floor status.{" "}
+        v2 PO mirror + scheduling + floor status + inbound (CG-bound).{" "}
         {mostRecent
           ? `Last mirrored ${mostRecent.toISOString().slice(0, 16).replace("T", " ")} UTC.`
           : "Mirror hasn't run yet."}{" "}
-        Receiving and inbound tracking land in subsequent phases.
+        Syncore receiving-memo writeback (Phase 4.2) + carrier auto-poll
+        (Phase 5) coming next.
         <span className="ml-2">
           <Link href="/admin/users" className="text-cg-teal hover:underline">
             Admin · user roles →
@@ -257,6 +285,30 @@ export default async function ProductionPage({ searchParams }: PageProps) {
         </span>
       </footer>
     </div>
+  );
+}
+
+function TopTab({
+  href,
+  label,
+  active,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={[
+        "px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition",
+        active
+          ? "border-cg-teal text-[#1C2B27]"
+          : "border-transparent text-[#6B6356] hover:text-[#1C2B27]",
+      ].join(" ")}
+    >
+      {label}
+    </Link>
   );
 }
 

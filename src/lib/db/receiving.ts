@@ -7,7 +7,10 @@
 
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "./client";
-import { IN_HOUSE_SUPPLIER_CLASS } from "@/lib/syncore/production";
+import {
+  IN_HOUSE_SUPPLIER_CLASS,
+  isShippingToCg,
+} from "@/lib/syncore/production";
 
 export type MirroredPo = typeof schema.productionPoMirror.$inferSelect;
 export type InboundReceiptState = typeof schema.poInboundState.$inferSelect;
@@ -24,9 +27,17 @@ export interface InboundPoView {
  * (Open / Approved — not yet posted), plus our local receipt state and
  * tracking entries. Ordered by in_hand_date ascending so the most-urgent
  * arrivals float to the top.
+ *
+ * `cgOnly` (default true) restricts to POs whose ship_to is Color
+ * Graphics — what Kristen actually receives. The future CSR dashboard
+ * will pass `cgOnly: false` to see everything regardless of destination.
  */
-export async function listInboundPos(): Promise<InboundPoView[]> {
-  const pos = await db
+export async function listInboundPos(
+  opts: { cgOnly?: boolean } = {},
+): Promise<InboundPoView[]> {
+  const cgOnly = opts.cgOnly ?? true;
+
+  const rawPos = await db
     .select()
     .from(schema.productionPoMirror)
     .where(
@@ -39,6 +50,8 @@ export async function listInboundPos(): Promise<InboundPoView[]> {
       sql`COALESCE(${schema.productionPoMirror.inHandDate}, '9999-12-31') ASC`,
       asc(schema.productionPoMirror.syncoreJobId),
     );
+
+  const pos = cgOnly ? rawPos.filter((p) => isShippingToCg(p.raw)) : rawPos;
 
   if (pos.length === 0) return [];
 
