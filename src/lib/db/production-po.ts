@@ -8,6 +8,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "./client";
 import {
+  APPAREL_SUPPLIER_IDS,
   IN_HOUSE_SUPPLIER_CLASS,
   isShippingToCg,
   stitchCountFromPo,
@@ -154,6 +155,13 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
         and(
           inArray(schema.productionPoMirror.syncoreJobId, jobIds),
           sql`(${schema.productionPoMirror.supplierClass} IS NULL OR ${schema.productionPoMirror.supplierClass} != ${IN_HOUSE_SUPPLIER_CLASS})`,
+          // Apparel allowlist — same as the Inbound tab — so the
+          // schedule cards' "X/Y apparel POs · N tracking" badge counts
+          // only what Kristen actually receives as garments.
+          inArray(
+            schema.productionPoMirror.supplierId,
+            Array.from(APPAREL_SUPPLIER_IDS),
+          ),
         ),
       ),
   ]);

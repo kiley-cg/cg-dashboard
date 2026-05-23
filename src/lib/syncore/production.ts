@@ -17,6 +17,39 @@ import type {
 // Embroidery, CG Transfers, CG Fulfillment, plus any future ones).
 export const IN_HOUSE_SUPPLIER_CLASS = "In House Production";
 
+// Allowlist of Syncore supplier ids that ship apparel — used to filter
+// the Inbound tab and the schedule cards' inbound-apparel badge so they
+// reflect Kristen's actual receiving load. Without this allowlist we'd
+// include awards/promos vendors (Anico International), embellishment
+// supplies, etc. — things production doesn't actually receive as
+// garments.
+//
+// Maintained by Kiley. Add a new id here when CG onboards a new apparel
+// vendor; the supplier_class is unreliable for this distinction in our
+// tenant.
+export const APPAREL_SUPPLIER_IDS: ReadonlySet<number> = new Set([
+  20, // SanMar
+  723, // S&S Activewear (+ alphabroder)
+  17, // Cutter & Buck
+  90515, // Contract Garments
+  35441, // Richardson Cap
+  29971, // Storm Creek
+  319, // Charles River Apparel
+  75280, // Midwest Workwear
+  300, // Blue Generation
+  62250, // Sock Club
+  9070, // Landway International Corp
+  820, // Vantage Apparel
+  3775, // Outdoor Cap
+  35591, // Soffe
+]);
+
+export function isApparelSupplier(
+  supplierId: number | null | undefined,
+): boolean {
+  return supplierId != null && APPAREL_SUPPLIER_IDS.has(supplierId);
+}
+
 export type Department =
   | "embroidery"
   | "transfers"
