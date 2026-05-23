@@ -115,6 +115,9 @@ export interface DecorationPoView {
   // Total tracking entries across all apparel siblings for the same job —
   // surfaced on the card so the floor sees how many shipments are en route.
   inboundTrackingCount: number;
+  // Per-sibling-PO tracking entry count. Lets the tile's expanded inbound
+  // panel show "PO 25 (UPS x2)" inline without an extra round-trip.
+  trackingCountBySibling: Record<string, number>;
 }
 
 /**
@@ -200,15 +203,19 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
 
   return decorationPos.map((po) => {
     const jobSiblings = siblingsByJob.get(po.syncoreJobId) ?? [];
-    const inboundTrackingCount = jobSiblings.reduce(
-      (sum, s) => sum + (trackingCountByPoId.get(s.poId) ?? 0),
-      0,
-    );
+    const trackingCountBySibling: Record<string, number> = {};
+    let inboundTrackingCount = 0;
+    for (const s of jobSiblings) {
+      const n = trackingCountByPoId.get(s.poId) ?? 0;
+      trackingCountBySibling[s.poId] = n;
+      inboundTrackingCount += n;
+    }
     return {
       po,
       state: stateByPoId.get(po.poId) ?? null,
       apparelSiblings: jobSiblings,
       inboundTrackingCount,
+      trackingCountBySibling,
     };
   });
 }
