@@ -180,8 +180,17 @@ async function handle(req: Request) {
     jar,
   );
 
-  // Phase B: with whatever session we ended up with, try the receiving
-  // memo page.
+  // Phase B: prime the us. session by hitting /Login.asp?expired=1 —
+  // round 3 revealed that endpoint sets UserID/Token/TokenExpires on
+  // an otherwise-authed session. Looks like a session-resume handshake
+  // that fills in the per-user cookies us. apps actually check.
+  const primeChain = await followChain(
+    new URL(`${US_BASE}/Login.asp?expired=1`),
+    { method: "GET" },
+    jar,
+  );
+
+  // Phase C: NOW try the receiving memo with the full cookie jar.
   const memoUrl = new URL(
     `${US_BASE}/porder/receivingMemo.asp?ActionCMD=Edit&Corp=0&BranchID=97&PurchaseOrderID=${encodeURIComponent(poId)}`,
   );
@@ -194,15 +203,25 @@ async function handle(req: Request) {
   let memoBodyPreview = "";
   let memoIdHits: string[] = [];
   let poItemHits: string[] = [];
+  let bodyLooksLikeMemo = false;
   if (memoChain.final && memoChain.final.status === 200) {
     const text = await memoChain.final.text();
-    memoBodyPreview = text.slice(0, 500);
-    const memoMatches = text.match(/[Mm]emo[Ii][Dd]\s*[=:"]?\s*['"]?\d+/g);
-    const itemMatches = text.match(
-      /POItemID\s*=?\s*['"]?\d+|rowNo_\d+/g,
-    );
-    memoIdHits = memoMatches ? Array.from(new Set(memoMatches)).slice(0, 10) : [];
-    poItemHits = itemMatches ? Array.from(new Set(itemMatches)).slice(0, 10) : [];
+    memoBodyPreview = text.slice(0, 800);
+    // Be liberal: scrape any MemoId-shaped value as well as the form
+    // field markers we know the write call needs.
+    const memoMatches =
+      text.match(
+        /(?:[Mm]emo[Ii][Dd]|[Mm]emoID|name=["']memoID["'][^>]*value=["']\d+["'])/g,
+      ) ?? [];
+    const itemMatches =
+      text.match(
+        /(?:POItemID|name=["']POItemID["'][^>]*value=["']\d+["']|rowNo_\d+)/g,
+      ) ?? [];
+    memoIdHits = Array.from(new Set(memoMatches)).slice(0, 10);
+    poItemHits = Array.from(new Set(itemMatches)).slice(0, 10);
+    bodyLooksLikeMemo =
+      /receivingMemo|MemoID|POItemID/.test(text) &&
+      !/Login\.asp/.test(text.slice(0, 1000));
   }
 
   // Final cookie state per domain
@@ -213,8 +232,10 @@ async function handle(req: Request) {
     poId,
     finalCookies,
     loginChain: loginChain.hops,
+    primeChain: primeChain.hops,
     memoChain: memoChain.hops,
     memoFinalStatus: memoChain.final?.status,
+    bodyLooksLikeMemo,
     memoBodyPreview,
     memoIdHits,
     poItemHits,
