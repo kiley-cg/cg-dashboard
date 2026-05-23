@@ -8,6 +8,7 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "./client";
 import {
+  APPAREL_SUPPLIER_IDS,
   IN_HOUSE_SUPPLIER_CLASS,
   isShippingToCg,
 } from "@/lib/syncore/production";
@@ -37,6 +38,11 @@ export async function listInboundPos(
 ): Promise<InboundPoView[]> {
   const cgOnly = opts.cgOnly ?? true;
 
+  // Filter to apparel suppliers at the SQL layer — the allowlist is
+  // small enough to inline. Future CSR dashboard receiving could opt
+  // out of this by accepting a wider supplier scope.
+  const apparelIds = Array.from(APPAREL_SUPPLIER_IDS);
+
   const rawPos = await db
     .select()
     .from(schema.productionPoMirror)
@@ -44,6 +50,7 @@ export async function listInboundPos(
       and(
         sql`(${schema.productionPoMirror.supplierClass} IS NULL OR ${schema.productionPoMirror.supplierClass} != ${IN_HOUSE_SUPPLIER_CLASS})`,
         sql`${schema.productionPoMirror.status} NOT IN ('Posted Manually', 'Posted @ease A/P', 'Paid')`,
+        inArray(schema.productionPoMirror.supplierId, apparelIds),
       ),
     )
     .orderBy(
