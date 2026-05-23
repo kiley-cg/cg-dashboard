@@ -1,18 +1,9 @@
-// Probe for Phase 4.2: can we authenticate to us.ateasesystems.net with
-// the same credentials we use for www., and if so what does the receiving
-// memo page give us for a known PO?
-//
-// Three things this checks:
-//   1. GET us.ateasesystems.net/Account/Login — does the same CSRF form
-//      live there?
-//   2. POST creds against that login — does it accept SYNCORE_USERNAME /
-//      SYNCORE_PASSWORD or does it require the v2->v1 LoginFromV2.asp
-//      bridge?
-//   3. With cookies in hand, GET /porder/receivingMemo.asp?PurchaseOrderID
-//      — does it auto-resolve MemoId, redirect to a list, or 404?
-//
-// Gated on CRON_SECRET. Temporary — will be deleted once we land the
-// real receiving-memo writeback.
+// Phase 4.2 probe round 3: follow the redirect chain after POSTing to
+// us.ateasesystems.net/Login.asp. Round 2 showed login redirects to
+// www. — we suspected us. delegates auth to www. and bounces back
+// with the right cookies. This round walks the chain manually so we
+// can see (a) every hop, (b) the final cookie jar, (c) whether the
+// resulting session unlocks /porder/receivingMemo.asp.
 
 import { NextResponse } from "next/server";
 
@@ -20,6 +11,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 const US_BASE = "https://us.ateasesystems.net";
+const WWW_BASE = "https://www.ateasesystems.net";
 
 function authorize(req: Request): boolean {
   const expected = process.env.CRON_SECRET;
@@ -36,36 +28,112 @@ function envOrThrow(name: string): string {
   return v;
 }
 
-function mergeSetCookies(headers: Headers, jar: Map<string, string>): void {
-  for (const raw of headers.getSetCookie()) {
+interface CookieJar {
+  // domain → name → value. Crude single-tenant model; we only deal with
+  // two hostnames so anything more elaborate is overkill.
+  byDomain: Map<string, Map<string, string>>;
+}
+
+function newJar(): CookieJar {
+  return { byDomain: new Map() };
+}
+
+function ingest(jar: CookieJar, url: URL, res: Response): void {
+  const host = url.hostname;
+  const inner = jar.byDomain.get(host) ?? new Map<string, string>();
+  for (const raw of res.headers.getSetCookie()) {
     const [pair] = raw.split(";");
     const idx = pair.indexOf("=");
     if (idx <= 0) continue;
     const name = pair.slice(0, idx).trim();
     const value = pair.slice(idx + 1).trim();
-    if (name) jar.set(name, value);
+    if (name) inner.set(name, value);
   }
+  jar.byDomain.set(host, inner);
 }
 
-function cookieHeader(jar: Map<string, string>): string {
-  return Array.from(jar.entries())
+function cookieHeaderFor(jar: CookieJar, url: URL): string {
+  const inner = jar.byDomain.get(url.hostname);
+  if (!inner || inner.size === 0) return "";
+  return Array.from(inner.entries())
     .map(([n, v]) => `${n}=${v}`)
     .join("; ");
 }
 
-interface ProbeStep {
-  label: string;
-  url: string;
+interface Hop {
+  i: number;
   method: string;
-  status?: number;
+  url: string;
+  status: number;
   contentType?: string;
   location?: string | null;
-  bodyPreview?: string;
-  cookieKeys?: string[];
-  csrfTokenFound?: boolean;
-  memoIdHits?: string[];
-  poItemHits?: string[];
-  error?: string;
+  cookieKeysAfter: Record<string, string[]>;
+}
+
+async function followChain(
+  start: URL,
+  init: { method: "GET" | "POST"; body?: string; contentType?: string },
+  jar: CookieJar,
+  max = 8,
+): Promise<{ hops: Hop[]; final: Response | null; finalUrl: URL | null }> {
+  const hops: Hop[] = [];
+  let nextUrl: URL | null = start;
+  let nextMethod: "GET" | "POST" = init.method;
+  let nextBody: string | undefined = init.body;
+  let nextContentType: string | undefined = init.contentType;
+  let final: Response | null = null;
+  let finalUrl: URL | null = null;
+
+  for (let i = 0; i < max && nextUrl; i++) {
+    const headers: Record<string, string> = {
+      Accept: "text/html,*/*",
+    };
+    const cookieHeader = cookieHeaderFor(jar, nextUrl);
+    if (cookieHeader) headers["Cookie"] = cookieHeader;
+    if (nextContentType) headers["Content-Type"] = nextContentType;
+
+    const res: Response = await fetch(nextUrl, {
+      method: nextMethod,
+      headers,
+      body: nextBody,
+      redirect: "manual",
+      cache: "no-store",
+    });
+    ingest(jar, nextUrl, res);
+
+    const cookieSnapshot: Record<string, string[]> = {};
+    for (const [d, m] of jar.byDomain) cookieSnapshot[d] = Array.from(m.keys());
+
+    const loc: string | null = res.headers.get("location");
+    hops.push({
+      i,
+      method: nextMethod,
+      url: nextUrl.toString(),
+      status: res.status,
+      contentType: res.headers.get("content-type") ?? undefined,
+      location: loc,
+      cookieKeysAfter: cookieSnapshot,
+    });
+
+    if (res.status >= 300 && res.status < 400 && loc) {
+      // Drain body to free socket
+      await res.text().catch(() => "");
+      // Resolve relative redirects against current URL
+      nextUrl = new URL(loc, nextUrl);
+      // Per RFC: 302/303 convert to GET; 307/308 preserve. For our
+      // ASP world everything we'll see is 302, so always GET.
+      nextMethod = "GET";
+      nextBody = undefined;
+      nextContentType = undefined;
+      continue;
+    }
+
+    final = res;
+    finalUrl = nextUrl;
+    break;
+  }
+
+  return { hops, final, finalUrl };
 }
 
 async function handle(req: Request) {
@@ -79,9 +147,6 @@ async function handle(req: Request) {
   const url = new URL(req.url);
   const poId = url.searchParams.get("poId") ?? "68776";
 
-  const steps: ProbeStep[] = [];
-  const jar = new Map<string, string>();
-
   let username: string;
   let password: string;
   try {
@@ -94,116 +159,66 @@ async function handle(req: Request) {
     );
   }
 
-  // Step 1: GET /Login.asp — classic ASP login form. Inspect for the
-  // input names + any token field.
-  try {
-    const res = await fetch(`${US_BASE}/Login.asp`, { redirect: "manual" });
-    mergeSetCookies(res.headers, jar);
-    const html = await res.text();
-    // Capture every <input name="..."> for the form. Useful to see what
-    // we need to POST.
-    const inputNames = Array.from(
-      html.matchAll(/<input[^>]+name=["']([^"']+)["']/g),
-    ).map((m) => m[1]);
-    // Capture <form action="...">
-    const formAction = html.match(/<form[^>]+action=["']([^"']+)["']/i)?.[1];
-    steps.push({
-      label: "GET /Login.asp",
-      url: `${US_BASE}/Login.asp`,
-      method: "GET",
-      status: res.status,
-      contentType: res.headers.get("content-type") ?? undefined,
-      cookieKeys: Array.from(jar.keys()),
-      bodyPreview: `formAction=${formAction ?? "?"}; inputs=[${Array.from(new Set(inputNames)).join(", ")}]`,
-    });
-  } catch (err) {
-    steps.push({
-      label: "GET /Login.asp",
-      url: `${US_BASE}/Login.asp`,
-      method: "GET",
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  const jar = newJar();
 
-  // Step 2: POST credentials with classic-ASP-style form. The exact
-  // input names will surface from step 1 — try the most common
-  // (UserName / Password / Login) as a first pass.
-  try {
-    const body = new URLSearchParams({
-      UserName: username,
-      Password: password,
-      Login: "Login",
-    });
-    const res = await fetch(`${US_BASE}/Login.asp`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Cookie: cookieHeader(jar),
-      },
-      body: body.toString(),
-      redirect: "manual",
-    });
-    mergeSetCookies(res.headers, jar);
-    const location = res.headers.get("location");
-    const text = await res.text().catch(() => "");
-    steps.push({
-      label: "POST /Login.asp (UserName/Password/Login)",
-      url: `${US_BASE}/Login.asp`,
-      method: "POST",
-      status: res.status,
-      contentType: res.headers.get("content-type") ?? undefined,
-      location,
-      cookieKeys: Array.from(jar.keys()),
-      bodyPreview: text.slice(0, 300),
-    });
-  } catch (err) {
-    steps.push({
-      label: "POST /Login.asp",
-      url: `${US_BASE}/Login.asp`,
-      method: "POST",
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  // Phase A: POST credentials to us./Login.asp and follow wherever it
+  // sends us. Hopefully it eventually drops us back on us. with
+  // UserID/Token cookies.
+  const loginBody = new URLSearchParams({
+    UserName: username,
+    Password: password,
+    Login: "Login",
+  }).toString();
 
-  // Step 3: GET receivingMemo with PO id, see what comes back. Look in
-  // the HTML for any value that smells like a Memo id and capture the
-  // POItemID / rowNo_<id> patterns so we know the form fields exist.
-  try {
-    const res = await fetch(
-      `${US_BASE}/porder/receivingMemo.asp?ActionCMD=Edit&Corp=0&BranchID=97&PurchaseOrderID=${encodeURIComponent(poId)}`,
-      {
-        headers: { Cookie: cookieHeader(jar) },
-        redirect: "manual",
-      },
-    );
-    mergeSetCookies(res.headers, jar);
-    const text = await res.text();
-    const memoMatches = text.match(/[Mm]emo[Ii][Dd]\s*[=:"]\s*['"]?\d+/g);
+  const loginChain = await followChain(
+    new URL(`${US_BASE}/Login.asp`),
+    {
+      method: "POST",
+      body: loginBody,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    jar,
+  );
+
+  // Phase B: with whatever session we ended up with, try the receiving
+  // memo page.
+  const memoUrl = new URL(
+    `${US_BASE}/porder/receivingMemo.asp?ActionCMD=Edit&Corp=0&BranchID=97&PurchaseOrderID=${encodeURIComponent(poId)}`,
+  );
+  const memoChain = await followChain(
+    memoUrl,
+    { method: "GET" },
+    jar,
+  );
+
+  let memoBodyPreview = "";
+  let memoIdHits: string[] = [];
+  let poItemHits: string[] = [];
+  if (memoChain.final && memoChain.final.status === 200) {
+    const text = await memoChain.final.text();
+    memoBodyPreview = text.slice(0, 500);
+    const memoMatches = text.match(/[Mm]emo[Ii][Dd]\s*[=:"]?\s*['"]?\d+/g);
     const itemMatches = text.match(
       /POItemID\s*=?\s*['"]?\d+|rowNo_\d+/g,
     );
-    steps.push({
-      label: "GET /porder/receivingMemo.asp (with session)",
-      url: `${US_BASE}/porder/receivingMemo.asp?...&PurchaseOrderID=${poId}`,
-      method: "GET",
-      status: res.status,
-      contentType: res.headers.get("content-type") ?? undefined,
-      location: res.headers.get("location"),
-      cookieKeys: Array.from(jar.keys()),
-      memoIdHits: memoMatches ? Array.from(new Set(memoMatches)).slice(0, 10) : [],
-      poItemHits: itemMatches ? Array.from(new Set(itemMatches)).slice(0, 10) : [],
-      bodyPreview: text.slice(0, 500),
-    });
-  } catch (err) {
-    steps.push({
-      label: "GET /porder/receivingMemo.asp",
-      url: `${US_BASE}/porder/receivingMemo.asp`,
-      method: "GET",
-      error: err instanceof Error ? err.message : String(err),
-    });
+    memoIdHits = memoMatches ? Array.from(new Set(memoMatches)).slice(0, 10) : [];
+    poItemHits = itemMatches ? Array.from(new Set(itemMatches)).slice(0, 10) : [];
   }
 
-  return NextResponse.json({ poId, steps });
+  // Final cookie state per domain
+  const finalCookies: Record<string, string[]> = {};
+  for (const [d, m] of jar.byDomain) finalCookies[d] = Array.from(m.keys());
+
+  return NextResponse.json({
+    poId,
+    finalCookies,
+    loginChain: loginChain.hops,
+    memoChain: memoChain.hops,
+    memoFinalStatus: memoChain.final?.status,
+    memoBodyPreview,
+    memoIdHits,
+    poItemHits,
+  });
 }
 
 export async function GET(req: Request) {
