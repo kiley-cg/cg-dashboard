@@ -15,9 +15,12 @@ import { DeleteTrackingButton } from "./_components/DeleteTrackingButton";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Receiving · Color Graphics" };
 
-// CG's Syncore branch id, used to deep-link to the v1 receiving memo.
-// Hard-coded since it's stable across the tenant.
-const BRANCH_ID = 97;
+// Same v1 deep-link pattern used by /dashboard's CSR job lists. Lands on
+// the job's Syncore page; from there the user can hop into the PO and
+// its receiving memo. We tried /porder/receivingMemo.asp directly but
+// Syncore requires MemoId on that page and we don't have it until
+// Phase 4.2 wires the discovery.
+const SYNCORE_JOB_DEEP_LINK = "https://www.ateasesystems.net/Job/Details";
 
 interface RawShipTo {
   business_name?: string | null;
@@ -39,19 +42,8 @@ function customerLabel(
   return `Job ${view.po.syncoreJobId}`;
 }
 
-function syncoreReceivingMemoUrl(po: InboundPoView["po"]): string {
-  // Deep-link to v1 receiving memo. The user has to be already logged
-  // into Syncore for this to work directly; otherwise they'll bounce
-  // through /Account/Login. MemoId is omitted because we don't know
-  // it yet (Phase 4.2 will source it from the v1 list endpoint we
-  // haven't found).
-  const params = new URLSearchParams({
-    ActionCMD: "Edit",
-    Corp: "0",
-    BranchID: String(BRANCH_ID),
-    PurchaseOrderID: po.poId,
-  });
-  return `https://us.ateasesystems.net/porder/receivingMemo.asp?${params.toString()}`;
+function syncoreJobUrl(po: InboundPoView["po"]): string {
+  return `${SYNCORE_JOB_DEEP_LINK}/${po.syncoreJobId}`;
 }
 
 export default async function ReceivingPage() {
@@ -228,12 +220,12 @@ function InboundPoRow({ view }: { view: InboundPoView }) {
           </span>
         )}
         <a
-          href={syncoreReceivingMemoUrl(po)}
+          href={syncoreJobUrl(po)}
           target="_blank"
-          rel="noreferrer"
+          rel="noopener noreferrer"
           className="text-cg-teal hover:underline font-semibold ml-auto"
         >
-          Open in Syncore →
+          Open job in Syncore →
         </a>
       </div>
 
