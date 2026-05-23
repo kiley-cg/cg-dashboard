@@ -75,6 +75,10 @@ Tailwind theme is driven by `src/styles/brand-tokens.ts` (see also `tailwind.con
 - Provisional Syncore decisions (header name, write-back endpoint shape, follow-ups JSON keys) are documented in the README's "Known provisional decisions" — each is isolated to one file so it can be flipped without ripple.
 - Don't introduce a test framework or fixture data without checking with the user; the project ships with manual verification only.
 
+## Working with the user
+
+- **When investigating Syncore (or any external system) endpoints, ask the user for a HAR file first**, not for step-by-step DevTools instructions. A HAR captures the entire network session — every request, response body, set-cookies, redirect chain — in one file, and `jq` can slice it however you need. Asking for one curl at a time, or directing the user to filter Network panel rows manually, is much slower and easier to misdirect. To capture: Chrome DevTools → Network tab → check "Preserve log" → perform the flow → right-click any row → Save all as HAR with content. Then the user uploads the file and you parse it locally.
+
 ## Environment
 
 See `.env.example` for the annotated complete list. Required for any local run: `AUTH_SECRET`, `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET`, `ALLOWED_EMAIL_DOMAIN`, `DATABASE_URL`. Vendor and Syncore vars are required only for the features that touch them.
