@@ -188,6 +188,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                   po={v.po}
                   state={v.state}
                   apparelSiblings={v.apparelSiblings}
+                  inboundTrackingCount={v.inboundTrackingCount}
                   department={dept}
                   customer={customerMap.get(v.po.syncoreJobId) ?? null}
                   weekDays={weekDayOptions}
@@ -228,6 +229,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                       po={v.po}
                       state={v.state}
                       apparelSiblings={v.apparelSiblings}
+                      inboundTrackingCount={v.inboundTrackingCount}
                       department={dept}
                       customer={
                         customerMap.get(v.po.syncoreJobId) ?? null

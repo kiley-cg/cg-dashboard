@@ -52,6 +52,7 @@ interface Props {
   po: MirroredPo;
   state: PoScheduleState | null;
   apparelSiblings: MirroredPo[];
+  inboundTrackingCount: number;
   department: Department;
   customer: string | null; // best-effort, may be null
   weekDays: DayOption[]; // Mon-Fri of the displayed week
@@ -61,6 +62,7 @@ export function PoCard({
   po,
   state,
   apparelSiblings,
+  inboundTrackingCount,
   department,
   weekDays,
   customer,
@@ -137,6 +139,7 @@ export function PoCard({
               total={totalSiblings}
               open={openSiblings}
               earliest={earliestSiblingDate}
+              trackingCount={inboundTrackingCount}
             />
           </div>
         )}
@@ -193,11 +196,17 @@ function InboundBadge({
   total,
   open,
   earliest,
+  trackingCount,
 }: {
   total: number;
   open: number;
   earliest: string | undefined;
+  trackingCount: number;
 }) {
+  const tracking =
+    trackingCount > 0
+      ? ` · ${trackingCount} tracking`
+      : "";
   // No apparel POs open = green "all here". Some open = yellow "waiting".
   // Receiving-memo wiring lands in Phase 4; for now we treat "Posted" /
   // "Paid" status as a proxy for "received".
@@ -205,7 +214,7 @@ function InboundBadge({
     return (
       <span className="inline-flex items-center gap-1.5 text-[#3A8C5F] font-semibold">
         <Dot color="#3A8C5F" /> Apparel all closed ({total} PO
-        {total === 1 ? "" : "s"})
+        {total === 1 ? "" : "s"}){tracking}
       </span>
     );
   }
@@ -214,6 +223,7 @@ function InboundBadge({
       <Dot color="#E0A800" /> {open}/{total} apparel PO
       {total === 1 ? "" : "s"} still open
       {earliest ? ` · earliest in-hand ${earliest.slice(5)}` : ""}
+      {tracking}
     </span>
   );
 }
