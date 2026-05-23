@@ -8,6 +8,7 @@ import type {
 import type { Department } from "@/lib/syncore/production";
 import { ScheduleControl } from "./ScheduleControl";
 import { FloorStatusControl } from "./FloorStatusControl";
+import { NotesEditor } from "./NotesEditor";
 
 const FLOOR_STATUSES = ["stopped", "in_progress", "done"] as const;
 type FloorStatus = (typeof FLOOR_STATUSES)[number];
@@ -177,6 +178,11 @@ export function PoCard({
             syncoreClosedAt={state?.syncoreClosedAt ?? null}
           />
         </div>
+
+        <NotesEditor
+          poId={po.poId}
+          initialNotes={state?.productionNotes ?? null}
+        />
       </div>
     </article>
   );

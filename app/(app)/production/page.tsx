@@ -139,7 +139,15 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             What runs today
           </h1>
         </div>
-        <NotificationToggle />
+        <div className="flex items-center gap-3">
+          <Link
+            href="/production/notes"
+            className="text-[13px] font-semibold text-cg-teal hover:underline"
+          >
+            Notes archive
+          </Link>
+          <NotificationToggle />
+        </div>
       </header>
 
       {/* Top-level tab strip: Schedule (Kristen's day-by-day decoration

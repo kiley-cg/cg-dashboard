@@ -299,3 +299,47 @@ export async function unmarkReceivedAction(
   await unmarkReceived(poId);
   revalidatePath("/production");
 }
+
+/**
+ * Save Kristen's production notes for a PO. Notes persist past PO close
+ * so the /production/notes archive can surface "how did I do this
+ * customer last time". Upserts po_schedule_state by poId so unscheduled
+ * POs can still accumulate notes.
+ *
+ * Empty/whitespace string clears the field (sets NULL) and also clears
+ * the audit timestamp + author — so the archive page can filter on
+ * "notes IS NOT NULL" to skip cleared rows.
+ */
+export async function saveProductionNotes(formData: FormData): Promise<void> {
+  const { userId } = await authorize();
+
+  const poId = formData.get("poId");
+  const notesRaw = formData.get("notes");
+  if (typeof poId !== "string" || !poId) throw new Error("Missing poId");
+  if (typeof notesRaw !== "string") throw new Error("Missing notes");
+
+  const trimmed = notesRaw.trim();
+  const isClear = trimmed.length === 0;
+  const now = new Date();
+
+  await db
+    .insert(schema.poScheduleState)
+    .values({
+      poId,
+      productionNotes: isClear ? null : trimmed,
+      notesUpdatedAt: isClear ? null : now,
+      notesUpdatedByUserId: isClear ? null : userId,
+    })
+    .onConflictDoUpdate({
+      target: schema.poScheduleState.poId,
+      set: {
+        productionNotes: isClear ? null : trimmed,
+        notesUpdatedAt: isClear ? null : now,
+        notesUpdatedByUserId: isClear ? null : userId,
+        updatedAt: now,
+      },
+    });
+
+  revalidatePath("/production");
+  revalidatePath("/production/notes");
+}
