@@ -266,35 +266,37 @@ export function parseFormSnapshot(
   html: string,
   opts: { formName?: string; formIndex?: number } = {},
 ): FormSnapshot {
-  // Find the target form's full HTML by scanning for `<form ...>...</form>`.
-  const formRx = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
-  let target: { attrs: string; inner: string } | null = null;
-  let idx = 0;
-  let m: RegExpExecArray | null;
-  while ((m = formRx.exec(html)) !== null) {
-    const attrs = m[1];
-    const inner = m[2];
-    const hasAction = /\baction\s*=/i.test(attrs);
-    if (opts.formName) {
-      if (new RegExp(`\\bname\\s*=\\s*["']${opts.formName}["']`, "i").test(attrs)) {
-        target = { attrs, inner };
-        break;
-      }
-    } else if (opts.formIndex != null) {
-      if (idx === opts.formIndex) {
-        target = { attrs, inner };
-        break;
-      }
-    } else if (hasAction && target == null) {
-      // Default: first form with a non-empty action — that's the real one.
-      target = { attrs, inner };
-      break;
-    }
-    idx++;
+  // Locate the target form's opening tag DIRECTLY rather than iterating
+  // <form>...</form> pairs. The receiving-memo page has a stray
+  // `<form />` placeholder before the real form, and a greedy/lazy
+  // <form>...</form> regex eats the real form as the "content" of that
+  // placeholder. By searching for the opening tag we want by attribute
+  // and slicing from there to the next </form>, we sidestep the trap.
+  let openMatch: RegExpExecArray | null = null;
+  if (opts.formName) {
+    const escName = opts.formName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    openMatch = new RegExp(
+      `<form\\b[^>]*\\bname\\s*=\\s*["']${escName}["'][^>]*>`,
+      "i",
+    ).exec(html);
+  } else {
+    // Default: first <form ...> whose opening tag contains an action attr.
+    const candidate = /<form\b[^>]*\baction\s*=\s*["'][^"']+["'][^>]*>/i.exec(
+      html,
+    );
+    if (candidate) openMatch = candidate;
   }
-  if (!target) {
+
+  if (!openMatch) {
     throw new Error("parseFormSnapshot: no matching form found");
   }
+
+  const openTag = openMatch[0];
+  const attrs = openTag.replace(/^<form\b/i, "").replace(/>$/, "");
+  const innerStart = openMatch.index + openTag.length;
+  const closeIdx = html.indexOf("</form>", innerStart);
+  const inner = closeIdx === -1 ? html.slice(innerStart) : html.slice(innerStart, closeIdx);
+  const target = { attrs, inner };
 
   const actionAttr =
     target.attrs.match(/\baction\s*=\s*["']([^"']+)["']/i)?.[1] ?? "";
