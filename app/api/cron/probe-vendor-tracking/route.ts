@@ -13,7 +13,11 @@
 // vendor: sanmar | ss | cb (only sanmar wired today)
 
 import { NextResponse } from "next/server";
-import { fetchSanMarTracking } from "@/lib/vendors/sanmar/tracking";
+import {
+  fetchSanMarTracking,
+  fetchSanMarTrackingRaw,
+} from "@/lib/vendors/sanmar/tracking";
+import type { OsnQueryType } from "@/lib/vendors/promostandards/orderShipmentNotification";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -112,12 +116,35 @@ export async function GET(req: Request) {
     });
   }
 
+  // Optional ?queryType= to test PO vs salesOrder. Default = po.
+  const qt = url.searchParams.get("queryType");
+  const queryType: OsnQueryType | undefined =
+    qt === "salesOrder" || qt === "po" || qt === "shipmentDate"
+      ? qt
+      : undefined;
+  // ?raw=1 — return the entire SOAP response so we can debug parsing
+  // / PO-format issues when shipments[] comes back empty.
+  const includeRaw = url.searchParams.get("raw") === "1";
+
   const startedAt = Date.now();
   try {
     let shipments;
+    let raw: unknown = undefined;
     switch (vendor) {
       case "sanmar":
-        shipments = await fetchSanMarTracking(poNumber, { wsdlUrl: wsdlOverride ?? undefined });
+        if (includeRaw) {
+          const result = await fetchSanMarTrackingRaw(poNumber, {
+            wsdlUrl: wsdlOverride ?? undefined,
+            queryType,
+          });
+          shipments = result.shipments;
+          raw = result.raw;
+        } else {
+          shipments = await fetchSanMarTracking(poNumber, {
+            wsdlUrl: wsdlOverride ?? undefined,
+            queryType,
+          });
+        }
         break;
       case "ss":
       case "cb":
@@ -139,8 +166,10 @@ export async function GET(req: Request) {
       vendor,
       poNumber,
       wsdlUrl: wsdlOverride ?? "(default)",
+      queryType: queryType ?? "po",
       shipmentCount: shipments.length,
       shipments,
+      raw,
       durationMs: Date.now() - startedAt,
     });
   } catch (err) {

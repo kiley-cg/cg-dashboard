@@ -1,5 +1,7 @@
 import {
   getOrderShipmentNotification,
+  type OsnQueryType,
+  type OsnResult,
   type OsnShipmentPackage,
 } from "../promostandards/orderShipmentNotification";
 
@@ -27,20 +29,32 @@ function env(name: string): string | null {
 
 export async function fetchSanMarTracking(
   poNumber: string,
-  opts: { wsdlUrl?: string } = {},
+  opts: { wsdlUrl?: string; queryType?: OsnQueryType } = {},
 ): Promise<OsnShipmentPackage[]> {
+  const result = await fetchSanMarTrackingRaw(poNumber, opts);
+  return result.shipments;
+}
+
+/**
+ * Same call but returns the full OsnResult including the raw SOAP
+ * response. Used by the probe route to debug parsing / PO format
+ * issues before locking in the params for the production cron.
+ */
+export async function fetchSanMarTrackingRaw(
+  poNumber: string,
+  opts: { wsdlUrl?: string; queryType?: OsnQueryType } = {},
+): Promise<OsnResult> {
   const wsdlUrl = opts.wsdlUrl ?? env("SANMAR_OSN_WSDL_URL") ?? DEFAULT_WSDL_URL;
   const id = env("SANMAR_WS_ID");
   const password = env("SANMAR_WS_PASSWORD");
   if (!id || !password) {
     throw new Error("Missing SANMAR_WS_ID / SANMAR_WS_PASSWORD");
   }
-  const result = await getOrderShipmentNotification({
+  return await getOrderShipmentNotification({
     wsdlUrl,
     id,
     password,
-    queryType: "po",
+    queryType: opts.queryType ?? "po",
     referenceNumber: poNumber,
   });
-  return result.shipments;
 }
