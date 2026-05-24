@@ -27,7 +27,7 @@ import { InboundTab } from "./_components/InboundTab";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
-  title: "What runs today · Color Graphics",
+  title: "CG Production · Color Graphics",
 };
 
 type TabKey = "schedule" | "inbound";
@@ -136,7 +136,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             Color Graphics · Production
           </p>
           <h1 className="text-[34px] font-medium tracking-tight mt-1 font-serif">
-            What runs today
+            CG Production
           </h1>
         </div>
         <div className="flex items-center gap-3">
