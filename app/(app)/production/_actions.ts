@@ -250,7 +250,19 @@ function isCarrier(value: string): boolean {
   return (CARRIERS as readonly string[]).includes(value);
 }
 
-export async function addTrackingAction(formData: FormData): Promise<void> {
+export interface AddTrackingResult {
+  ok: true;
+  // Whether the auto-push to Syncore Job Log succeeded. The local row
+  // was always written if ok === true.
+  syncedToJobLog: boolean;
+  // Present when syncedToJobLog is false — surfaces inline so the user
+  // can retry via the manual "→ Job Log" button.
+  syncError?: string;
+}
+
+export async function addTrackingAction(
+  formData: FormData,
+): Promise<AddTrackingResult> {
   const { userId } = await authorize();
   const poId = formData.get("poId");
   const carrier = formData.get("carrier");
@@ -268,7 +280,18 @@ export async function addTrackingAction(formData: FormData): Promise<void> {
     trackingNumber: trackingNumber.trim(),
     userId,
   });
+
+  // Auto-push to Syncore Job Log so everyone at CG sees it. If Syncore
+  // is down or rejects the call, the local add still succeeded; we
+  // surface the sync error inline so the user can retry via the manual
+  // "→ Job Log" button.
+  const syncResult = await postTrackingToJobLog(poId);
+
   revalidatePath("/production");
+  if (syncResult.ok) {
+    return { ok: true, syncedToJobLog: true };
+  }
+  return { ok: true, syncedToJobLog: false, syncError: syncResult.error };
 }
 
 export async function deleteTrackingAction(
@@ -346,25 +369,12 @@ export async function saveProductionNotes(formData: FormData): Promise<void> {
 }
 
 /**
- * Push a PO's accumulated tracking numbers to its Syncore Job Log as a
- * single entry. This is the user-facing "Send to Syncore" / "Push to
- * Job Log" button on each apparel-sibling row.
- *
- * Returns ActionResult so the client can surface success/failure
- * inline; throws only on unauthorized access. Does NOT throw on
- * Syncore failures — those come back as { ok: false, error }.
+ * Internal: format and push a PO's tracking #s to its Syncore Job Log.
+ * Returns ActionResult. Used by both the explicit "→ Job Log" button
+ * (pushTrackingToJobLogAction) AND auto-fired from addTrackingAction so
+ * the floor doesn't need a second click.
  */
-export async function pushTrackingToJobLogAction(
-  formData: FormData,
-): Promise<ActionResult> {
-  await authorize();
-
-  const poId = formData.get("poId");
-  if (typeof poId !== "string" || !poId) {
-    return { ok: false, error: "Missing poId" };
-  }
-
-  // Look up the PO + tracking entries in parallel.
+async function postTrackingToJobLog(poId: string): Promise<ActionResult> {
   const [poRow, trackingEntries] = await Promise.all([
     db
       .select({
@@ -383,15 +393,9 @@ export async function pushTrackingToJobLogAction(
     return { ok: false, error: `PO ${poId} not found in mirror` };
   }
   if (trackingEntries.length === 0) {
-    return {
-      ok: false,
-      error: "No tracking numbers entered yet for this PO",
-    };
+    return { ok: false, error: "No tracking numbers entered yet for this PO" };
   }
 
-  // Format the Job Log entry — mirror the natural style users already
-  // write ("Tracking #: 1Z… — UPS — PO 32616-1"), extended to handle
-  // multiple tracking numbers cleanly.
   const poLabel =
     poRow.poNumber != null ? `${poRow.syncoreJobId}-${poRow.poNumber}` : poId;
   const carriersSeen = new Set(
@@ -429,4 +433,20 @@ export async function pushTrackingToJobLogAction(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/**
+ * Manual "→ Job Log" trigger — useful as a retry escape hatch when
+ * the auto-push from addTrackingAction fails. The "+ Add" form auto-
+ * fires postTrackingToJobLog for the happy path.
+ */
+export async function pushTrackingToJobLogAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  await authorize();
+  const poId = formData.get("poId");
+  if (typeof poId !== "string" || !poId) {
+    return { ok: false, error: "Missing poId" };
+  }
+  return await postTrackingToJobLog(poId);
 }

@@ -14,8 +14,17 @@ export function TrackingForm({ poId }: { poId: string }) {
     const fd = new FormData(e.currentTarget);
     start(async () => {
       try {
-        await addTrackingAction(fd);
+        const result = await addTrackingAction(fd);
         if (numberRef.current) numberRef.current.value = "";
+        // The action always writes the local row before auto-pushing
+        // to Syncore. If the push failed (Syncore down, expired
+        // session, etc.) surface it so the user can retry via the
+        // manual "→ Job Log" button; the local add still succeeded.
+        if (!result.syncedToJobLog) {
+          alert(
+            `Saved locally, but couldn't sync to Syncore Job Log.\n\n${result.syncError ?? "Unknown error"}\n\nUse the "→ Job Log" button to retry.`,
+          );
+        }
       } catch (err) {
         alert(
           `Couldn't add tracking: ${err instanceof Error ? err.message : String(err)}`,
@@ -58,8 +67,9 @@ export function TrackingForm({ poId }: { poId: string }) {
           "border border-cg-teal text-cg-teal font-semibold rounded px-2 py-0.5 text-[11px] hover:bg-cg-teal hover:text-white transition",
           pending ? "opacity-60 cursor-wait" : "",
         ].join(" ")}
+        title="Adds the tracking # locally AND posts it to the Syncore Job Log"
       >
-        {pending ? "Adding…" : "+ Add"}
+        {pending ? "Adding…" : "+ Add & sync"}
       </button>
     </form>
   );
