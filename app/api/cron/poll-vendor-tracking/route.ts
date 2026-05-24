@@ -91,9 +91,13 @@ async function handler(req: Request): Promise<NextResponse> {
 
   const results: PoResult[] = [];
 
-  for (const po of pos) {
+  // Process one PO end-to-end (vendor lookup → dedup insert → Job Log
+  // push). Returns a single PoResult. Pulled out so we can run several
+  // POs in parallel — a serial loop over 200 POs at ~1.8s/SOAP-call
+  // would burn 6 minutes and time out at the Vercel edge.
+  const processPo = async (po: (typeof pos)[number]): Promise<PoResult> => {
     if (po.poNumber == null) {
-      results.push({
+      return {
         poId: po.poId,
         jobId: po.jobId,
         poNumber: null,
@@ -101,13 +105,9 @@ async function handler(req: Request): Promise<NextResponse> {
         vendor: "unknown",
         outcome: "skipped",
         reason: "no PO number on mirror",
-      });
-      continue;
+      };
     }
 
-    // SanMar / C&B / S&S all want the customer-facing PO number, which
-    // for Color Graphics is `{jobId}-{poNumber}` (matches the ePO push
-    // format we see in the Syncore Job Log).
     const vendorPoNumber = `${po.jobId}-${po.poNumber}`;
 
     try {
@@ -117,7 +117,7 @@ async function handler(req: Request): Promise<NextResponse> {
       });
 
       if (vendor === "unknown" || vendor === "ss" || vendor === "cb") {
-        results.push({
+        return {
           poId: po.poId,
           jobId: po.jobId,
           poNumber: po.poNumber,
@@ -128,8 +128,7 @@ async function handler(req: Request): Promise<NextResponse> {
             vendor === "unknown"
               ? `unrecognized supplier "${po.supplier}"`
               : `${vendor} adapter not implemented yet`,
-        });
-        continue;
+        };
       }
 
       let added = 0;
@@ -143,15 +142,13 @@ async function handler(req: Request): Promise<NextResponse> {
         if (inserted) added++;
       }
 
-      // Only push to Syncore Job Log when we actually added something
-      // new — avoids spamming the log on re-runs that find no changes.
       let jobLogSynced = false;
       if (added > 0) {
         const push = await pushPoTrackingToJobLog(po.poId);
         jobLogSynced = push.ok;
       }
 
-      results.push({
+      return {
         poId: po.poId,
         jobId: po.jobId,
         poNumber: po.poNumber,
@@ -161,9 +158,9 @@ async function handler(req: Request): Promise<NextResponse> {
         shipmentCount: shipments.length,
         added,
         jobLogSynced,
-      });
+      };
     } catch (err) {
-      results.push({
+      return {
         poId: po.poId,
         jobId: po.jobId,
         poNumber: po.poNumber,
@@ -171,9 +168,25 @@ async function handler(req: Request): Promise<NextResponse> {
         vendor: "error",
         outcome: "error",
         error: err instanceof Error ? err.message : String(err),
-      });
+      };
     }
-  }
+  };
+
+  // Bounded-concurrency runner — fixed pool of workers pulling from a
+  // shared queue. Cap at 8: SanMar's WSDL load is cached after the
+  // first call, so most work is one HTTP round-trip per PO; 8 in
+  // flight is well below any reasonable rate limit and keeps the
+  // route under Vercel's edge timeout.
+  const CONCURRENCY = 8;
+  let nextIndex = 0;
+  const worker = async () => {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= pos.length) return;
+      results[i] = await processPo(pos[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
   const summary = {
     poCount: results.length,
