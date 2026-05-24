@@ -27,8 +27,9 @@ const US = "https://us.ateasesystems.net";
 
 // Full browser-parity headers — round 9 variant C established that
 // LoginFromV2 won't mint the us. UserID/Token cookies unless the request
-// looks like a real Chrome navigation. Stripping any of these may
-// reintroduce the bounce-to-frameset behavior round 8 saw.
+// looks like a real Chrome navigation. Header values mirror the working
+// probe set exactly; `Sec-Fetch-Site: "none"` (not "cross-site") is what
+// round 9 actually used and is what unlocks the chain.
 export const BROWSER_NAV_HEADERS: Record<string, string> = {
   "User-Agent":
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
@@ -37,7 +38,7 @@ export const BROWSER_NAV_HEADERS: Record<string, string> = {
   "Accept-Language": "en-US,en;q=0.9",
   "Sec-Fetch-Dest": "document",
   "Sec-Fetch-Mode": "navigate",
-  "Sec-Fetch-Site": "cross-site",
+  "Sec-Fetch-Site": "none",
   "Sec-Fetch-User": "?1",
   "Upgrade-Insecure-Requests": "1",
   "sec-ch-ua":
