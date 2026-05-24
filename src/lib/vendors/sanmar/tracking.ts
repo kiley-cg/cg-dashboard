@@ -12,12 +12,13 @@ import {
 // PromoStandards services, but they have to enable OSN on your account
 // separately. If you see auth errors, email webservices@sanmar.com.
 
-// Best-guess default — SanMar's inventory binding is
-// "InventoryServiceBindingV2final", so OSN 1.0.0 is most likely the
-// V1final variant. Override via SANMAR_OSN_WSDL_URL env (set on Vercel)
-// or via the probe route's ?wsdl= param to iterate without redeploying.
+// Per SanMar PO Integration Guide 24.1, their PromoStandards binding
+// pattern is "{Service}Binding?WSDL" (no version suffix) — e.g.
+// POServiceBinding?WSDL. So OSN should be at
+// OrderShipmentNotificationServiceBinding?WSDL. Override via
+// SANMAR_OSN_WSDL_URL env or via the probe's ?wsdl= param if not.
 const DEFAULT_WSDL_URL =
-  "https://ws.sanmar.com:8080/promostandards/OrderShipmentNotificationServiceBindingV1final?WSDL";
+  "https://ws.sanmar.com:8080/promostandards/OrderShipmentNotificationServiceBinding?WSDL";
 
 function env(name: string): string | null {
   const v = process.env[name];

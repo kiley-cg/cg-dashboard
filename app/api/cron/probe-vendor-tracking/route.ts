@@ -18,13 +18,14 @@ import { fetchSanMarTracking } from "@/lib/vendors/sanmar/tracking";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// SanMar's published binding name for OSN isn't documented in any
-// scraped reference I have; their inventory binding ends in "V2final"
-// and OSN exists as both 1.0.0 and 2.0.0 specs, so try the matrix.
-// First WSDL that loads + returns a SOAP response wins. Curl this with
-// ?scan=1 to iterate; the cron uses whichever SANMAR_OSN_WSDL_URL env
-// you lock in.
+// SanMar's PO Integration Guide v24.1 reveals the binding pattern:
+// "POServiceBinding?WSDL" — Binding suffix, no version. So OSN is
+// almost certainly at "OrderShipmentNotificationServiceBinding?WSDL".
+// Listed first as the most likely match, then fallbacks. Both PROD
+// (ws.sanmar.com) and TEST (test-ws.sanmar.com) hosts included.
 const SANMAR_OSN_CANDIDATES = [
+  "https://ws.sanmar.com:8080/promostandards/OrderShipmentNotificationServiceBinding?WSDL",
+  "https://test-ws.sanmar.com:8080/promostandards/OrderShipmentNotificationServiceBinding?WSDL",
   "https://ws.sanmar.com:8080/promostandards/OrderShipmentNotificationServiceBindingV2final?WSDL",
   "https://ws.sanmar.com:8080/promostandards/OrderShipmentNotificationServiceBindingV2?WSDL",
   "https://ws.sanmar.com:8080/promostandards/OrderShipmentNotificationServiceBindingV1final?WSDL",
@@ -32,9 +33,9 @@ const SANMAR_OSN_CANDIDATES = [
   "https://ws.sanmar.com:8080/promostandards/OrderShipmentNotificationServicev2?WSDL",
   "https://ws.sanmar.com:8080/promostandards/OrderShipmentNotificationServicev1?WSDL",
   "https://ws.sanmar.com:8080/promostandards/OrderShipmentNotificationService?WSDL",
+  "https://ws.sanmar.com:8080/promostandards/ShipNoticeServiceBinding?WSDL",
   "https://ws.sanmar.com:8080/promostandards/ShipNoticeServiceBindingV1final?WSDL",
   "https://ws.sanmar.com:8080/promostandards/ShipNoticeServiceBindingV1?WSDL",
-  "https://edev.sanmar.com:8080/promostandards/OrderShipmentNotificationServiceBindingV2final?WSDL",
 ];
 
 function authorize(req: Request): boolean {
