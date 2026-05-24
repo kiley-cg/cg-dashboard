@@ -46,10 +46,24 @@ function mergeSetCookies(headers: Headers, jar: Map<string, string>): void {
   }
 }
 
+// Exported building block for us-session.ts and other callers that need
+// to maintain their own per-host cookie jar (vs the module-level cached
+// www. session).
+export function mergeSetCookiesInto(
+  headers: Headers,
+  jar: Map<string, string>,
+): void {
+  mergeSetCookies(headers, jar);
+}
+
 function cookieHeader(jar: Map<string, string>): string {
   return Array.from(jar.entries())
     .map(([n, v]) => `${n}=${v}`)
     .join("; ");
+}
+
+export function cookieHeaderFor(jar: Map<string, string>): string {
+  return cookieHeader(jar);
 }
 
 async function login(): Promise<Session> {
@@ -111,6 +125,72 @@ async function login(): Promise<Session> {
     cookie: cookieHeader(jar),
     expiresAt: Date.now() + SESSION_TTL_MS,
   };
+}
+
+/**
+ * Like `login()` but exposes the cookie jar (Map) instead of a joined
+ * string, and does NOT populate the module-level cache. Use this when
+ * you need a guaranteed-fresh .ASPXAUTH (e.g. to force Token rotation
+ * for a us. session — see us-session.ts).
+ *
+ * Each call is one full login round-trip (GET + POST). Don't loop this
+ * tightly; reuse the returned jar within a single transaction.
+ */
+export async function freshWwwLogin(): Promise<Map<string, string>> {
+  const username = env("SYNCORE_USERNAME");
+  const password = env("SYNCORE_PASSWORD");
+
+  const loginUrl = `${WEB_BASE}/Account/Login`;
+  const jar = new Map<string, string>();
+
+  const getRes = await fetch(loginUrl, { redirect: "manual" });
+  mergeSetCookies(getRes.headers, jar);
+  const html = await getRes.text();
+
+  const tokenMatch =
+    html.match(/name="__RequestVerificationToken"[^>]*value="([^"]+)"/) ||
+    html.match(
+      /<input[^>]+name="__RequestVerificationToken"[^>]+value="([^"]+)"/,
+    );
+  if (!tokenMatch) {
+    throw new WebUiError("Could not find CSRF token on Syncore login page");
+  }
+
+  const body = new URLSearchParams({
+    Email: username,
+    Password: password,
+    __RequestVerificationToken: tokenMatch[1],
+  });
+
+  const postRes = await fetch(loginUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Cookie: cookieHeader(jar),
+    },
+    body: body.toString(),
+    redirect: "manual",
+  });
+  mergeSetCookies(postRes.headers, jar);
+
+  const location = postRes.headers.get("location") ?? "";
+  if (
+    postRes.status === 200 &&
+    (await postRes.text()).includes("Account/Login")
+  ) {
+    throw new WebUiError(
+      "Syncore login rejected — check SYNCORE_USERNAME / SYNCORE_PASSWORD",
+    );
+  }
+  if (
+    location.includes("/Account/Login") ||
+    location.includes("/Account/Two") ||
+    location.includes("/Account/Verify")
+  ) {
+    throw new WebUiError("Syncore login blocked (bad creds or MFA)");
+  }
+
+  return jar;
 }
 
 async function getSession(forceFresh = false): Promise<Session> {

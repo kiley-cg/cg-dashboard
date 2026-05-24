@@ -8,6 +8,8 @@ import type {
 import type { Department } from "@/lib/syncore/production";
 import { ScheduleControl } from "./ScheduleControl";
 import { FloorStatusControl } from "./FloorStatusControl";
+import { NotesEditor } from "./NotesEditor";
+import { InboundSiblingsPanel } from "./InboundSiblingsPanel";
 
 const FLOOR_STATUSES = ["stopped", "in_progress", "done"] as const;
 type FloorStatus = (typeof FLOOR_STATUSES)[number];
@@ -63,6 +65,7 @@ interface Props {
   state: PoScheduleState | null;
   apparelSiblings: MirroredPo[];
   inboundTrackingCount: number;
+  trackingCountBySibling: Record<string, number>;
   department: Department;
   customer: string | null; // best-effort, may be null
   weekDays: DayOption[]; // Mon-Fri of the displayed week
@@ -73,6 +76,7 @@ export function PoCard({
   state,
   apparelSiblings,
   inboundTrackingCount,
+  trackingCountBySibling,
   department,
   weekDays,
   customer,
@@ -82,17 +86,6 @@ export function PoCard({
   const instructions = csrInstructionsSnippet(po);
   const floorStatus = asFloorStatus(state?.floorStatus);
   const isDone = floorStatus === "done";
-
-  // Inbound apparel summary — how many siblings are still open, the
-  // earliest in-hand date so floor knows when shirts are likely landing.
-  const totalSiblings = apparelSiblings.length;
-  const openSiblings = apparelSiblings.filter(
-    (s) => s.status === "Open" || s.status === "Approved",
-  ).length;
-  const earliestSiblingDate = apparelSiblings
-    .map((s) => s.inHandDate)
-    .filter((d): d is string => !!d)
-    .sort()[0];
 
   return (
     <article
@@ -147,17 +140,13 @@ export function PoCard({
           )}
         </div>
 
-        {/* Inbound apparel status */}
-        {totalSiblings > 0 && (
-          <div className="mt-2 text-[12px]">
-            <InboundBadge
-              total={totalSiblings}
-              open={openSiblings}
-              earliest={earliestSiblingDate}
-              trackingCount={inboundTrackingCount}
-            />
-          </div>
-        )}
+        {/* Inbound apparel status — collapsed badge, expandable to add
+            tracking #s per sibling PO without leaving /production. */}
+        <InboundSiblingsPanel
+          siblings={apparelSiblings}
+          trackingCountBySibling={trackingCountBySibling}
+          inboundTrackingCount={inboundTrackingCount}
+        />
 
         {instructions && (
           <div className="mt-2 text-[12.5px] text-[#6B6356] bg-[#F3F1E8] border-l-[3px] border-[#E3DFD3] py-1.5 px-2.5 rounded-r">
@@ -177,6 +166,11 @@ export function PoCard({
             syncoreClosedAt={state?.syncoreClosedAt ?? null}
           />
         </div>
+
+        <NotesEditor
+          poId={po.poId}
+          initialNotes={state?.productionNotes ?? null}
+        />
       </div>
     </article>
   );
@@ -207,47 +201,3 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-function InboundBadge({
-  total,
-  open,
-  earliest,
-  trackingCount,
-}: {
-  total: number;
-  open: number;
-  earliest: string | undefined;
-  trackingCount: number;
-}) {
-  const tracking =
-    trackingCount > 0
-      ? ` · ${trackingCount} tracking`
-      : "";
-  // No apparel POs open = green "all here". Some open = yellow "waiting".
-  // Receiving-memo wiring lands in Phase 4; for now we treat "Posted" /
-  // "Paid" status as a proxy for "received".
-  if (open === 0) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-[#3A8C5F] font-semibold">
-        <Dot color="#3A8C5F" /> Apparel all closed ({total} PO
-        {total === 1 ? "" : "s"}){tracking}
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[#8A5A2B] font-semibold">
-      <Dot color="#E0A800" /> {open}/{total} apparel PO
-      {total === 1 ? "" : "s"} still open
-      {earliest ? ` · earliest in-hand ${earliest.slice(5)}` : ""}
-      {tracking}
-    </span>
-  );
-}
-
-function Dot({ color }: { color: string }) {
-  return (
-    <span
-      className="inline-block w-2 h-2 rounded-full"
-      style={{ background: color }}
-    />
-  );
-}

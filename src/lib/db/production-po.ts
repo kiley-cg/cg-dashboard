@@ -115,6 +115,9 @@ export interface DecorationPoView {
   // Total tracking entries across all apparel siblings for the same job —
   // surfaced on the card so the floor sees how many shipments are en route.
   inboundTrackingCount: number;
+  // Per-sibling-PO tracking entry count. Lets the tile's expanded inbound
+  // panel show "PO 25 (UPS x2)" inline without an extra round-trip.
+  trackingCountBySibling: Record<string, number>;
 }
 
 /**
@@ -200,15 +203,19 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
 
   return decorationPos.map((po) => {
     const jobSiblings = siblingsByJob.get(po.syncoreJobId) ?? [];
-    const inboundTrackingCount = jobSiblings.reduce(
-      (sum, s) => sum + (trackingCountByPoId.get(s.poId) ?? 0),
-      0,
-    );
+    const trackingCountBySibling: Record<string, number> = {};
+    let inboundTrackingCount = 0;
+    for (const s of jobSiblings) {
+      const n = trackingCountByPoId.get(s.poId) ?? 0;
+      trackingCountBySibling[s.poId] = n;
+      inboundTrackingCount += n;
+    }
     return {
       po,
       state: stateByPoId.get(po.poId) ?? null,
       apparelSiblings: jobSiblings,
       inboundTrackingCount,
+      trackingCountBySibling,
     };
   });
 }
@@ -282,4 +289,89 @@ export async function getMostRecentMirrorAt(): Promise<Date | null> {
     return Number.isNaN(d.getTime()) ? null : d;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Production notes archive
+// ---------------------------------------------------------------------------
+
+export interface NoteArchiveEntry {
+  poId: string;
+  poNumber: number | null;
+  jobId: string;
+  customer: string;
+  supplierName: string | null;
+  notes: string;
+  updatedAt: Date | null;
+  authorName: string | null;
+}
+
+/**
+ * Every PO with a saved production note, joined with mirror + author info
+ * for display. Optionally filter by free-text against the note body,
+ * customer, job id, and PO id (case-insensitive, ILIKE). Ordered by most
+ * recently edited so the latest jobs surface first.
+ *
+ * Includes closed/posted POs intentionally — the long-term value of the
+ * archive is "how did I do this job last year", not "what's on the floor
+ * right now".
+ */
+export async function listProductionNotes(opts?: {
+  query?: string;
+}): Promise<NoteArchiveEntry[]> {
+  const q = opts?.query?.trim();
+  const like = q ? `%${q}%` : null;
+
+  const rows = await db
+    .select({
+      poId: schema.poScheduleState.poId,
+      notes: schema.poScheduleState.productionNotes,
+      updatedAt: schema.poScheduleState.notesUpdatedAt,
+      authorName: schema.users.name,
+      poNumber: schema.productionPoMirror.poNumber,
+      jobId: schema.productionPoMirror.syncoreJobId,
+      supplierName: schema.productionPoMirror.supplierName,
+      raw: schema.productionPoMirror.raw,
+    })
+    .from(schema.poScheduleState)
+    .leftJoin(
+      schema.productionPoMirror,
+      eq(schema.productionPoMirror.poId, schema.poScheduleState.poId),
+    )
+    .leftJoin(
+      schema.users,
+      eq(schema.users.id, schema.poScheduleState.notesUpdatedByUserId),
+    )
+    .where(
+      and(
+        sql`${schema.poScheduleState.productionNotes} IS NOT NULL`,
+        like
+          ? sql`(
+              ${schema.poScheduleState.productionNotes} ILIKE ${like}
+              OR ${schema.productionPoMirror.syncoreJobId} ILIKE ${like}
+              OR ${schema.poScheduleState.poId} ILIKE ${like}
+              OR CAST(${schema.productionPoMirror.poNumber} AS TEXT) ILIKE ${like}
+              OR ${schema.productionPoMirror.supplierName} ILIKE ${like}
+            )`
+          : sql`TRUE`,
+      ),
+    )
+    .orderBy(desc(schema.poScheduleState.notesUpdatedAt));
+
+  return rows.map((r) => {
+    const raw = r.raw as { ship_to?: { business_name?: string | null } } | null;
+    const customer =
+      raw?.ship_to?.business_name?.trim() ||
+      (r.jobId ? `Job ${r.jobId}` : `PO ${r.poId}`);
+    return {
+      poId: r.poId,
+      poNumber: r.poNumber ?? null,
+      jobId: r.jobId ?? "",
+      customer,
+      supplierName: r.supplierName ?? null,
+      notes: r.notes ?? "",
+      updatedAt: r.updatedAt ?? null,
+      authorName: r.authorName ?? null,
+    };
+  });
 }

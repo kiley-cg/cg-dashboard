@@ -255,6 +255,15 @@ export const poScheduleState = pgTable(
     // Manually". Lets us retry the writeback if it failed without
     // double-posting.
     syncoreClosedAt: timestamp("syncore_closed_at", { mode: "date" }),
+    // Kristen's free-form notes on how this decoration job was run
+    // ("used 40wt thread", "needed two hoopings"). Persists past PO close
+    // so /production/notes can surface "how did I do this customer last
+    // time" — the real long-term value of the field.
+    productionNotes: text("production_notes"),
+    notesUpdatedAt: timestamp("notes_updated_at", { mode: "date" }),
+    notesUpdatedByUserId: text("notes_updated_by_user_id").references(
+      () => users.id,
+    ),
     updatedAt: timestamp("updated_at", { mode: "date" })
       .notNull()
       .defaultNow(),
@@ -262,6 +271,9 @@ export const poScheduleState = pgTable(
   (t) => ({
     idxDate: index("po_schedule_state_date_idx").on(t.scheduledDate),
     idxStatus: index("po_schedule_state_status_idx").on(t.floorStatus),
+    idxNotesUpdated: index("po_schedule_state_notes_updated_idx").on(
+      t.notesUpdatedAt,
+    ),
   }),
 );
 
