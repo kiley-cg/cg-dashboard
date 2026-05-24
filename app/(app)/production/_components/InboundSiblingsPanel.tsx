@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import type { MirroredPo } from "@/lib/db/production-po";
 import { TrackingForm } from "./TrackingForm";
+import { pushTrackingToJobLogAction } from "../_actions";
 
 interface Props {
   siblings: MirroredPo[];
@@ -96,7 +97,8 @@ export function InboundSiblingsPanel({
                     {count} tracking
                   </span>
                 </div>
-                <div className="ml-auto">
+                <div className="ml-auto flex items-center gap-2">
+                  {count > 0 && <PushButton poId={s.poId} />}
                   <TrackingForm poId={s.poId} />
                 </div>
               </li>
@@ -105,5 +107,41 @@ export function InboundSiblingsPanel({
         </ul>
       )}
     </div>
+  );
+}
+
+// Send the PO's tracking numbers to Syncore as a Job Log entry — the
+// closest thing to the team's actual workflow ("everyone sees it on the
+// job log"). Only enabled when at least one tracking number exists on
+// this PO. Disabled while in flight, alerts on failure.
+function PushButton({ poId }: { poId: string }) {
+  const [pending, start] = useTransition();
+  function onClick() {
+    start(async () => {
+      const fd = new FormData();
+      fd.set("poId", poId);
+      const result = await pushTrackingToJobLogAction(fd);
+      if (result.ok) {
+        // No toast system here yet — short native alert keeps the
+        // success unmissable on the floor.
+        alert("Sent to Syncore Job Log ✓");
+      } else {
+        alert(`Couldn't send to Syncore Job Log.\n\n${result.error}`);
+      }
+    });
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={pending}
+      className={[
+        "text-[11px] border border-cg-teal text-cg-teal font-semibold rounded px-2 py-0.5 hover:bg-cg-teal hover:text-white transition",
+        pending ? "opacity-60 cursor-wait" : "",
+      ].join(" ")}
+      title="Append this PO's tracking #s to the Syncore Job Log"
+    >
+      {pending ? "Sending…" : "→ Job Log"}
+    </button>
   );
 }
