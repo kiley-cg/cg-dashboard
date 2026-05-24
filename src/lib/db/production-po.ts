@@ -7,6 +7,7 @@
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "./client";
+import type { TrackingEntry } from "./receiving";
 import {
   APPAREL_SUPPLIER_IDS,
   IN_HOUSE_SUPPLIER_CLASS,
@@ -118,6 +119,10 @@ export interface DecorationPoView {
   // Per-sibling-PO tracking entry count. Lets the tile's expanded inbound
   // panel show "PO 25 (UPS x2)" inline without an extra round-trip.
   trackingCountBySibling: Record<string, number>;
+  // Per-sibling-PO list of tracking entries (id + carrier + number +
+  // source) so the panel can render an expandable list inline. Empty
+  // array for siblings with no tracking.
+  trackingBySibling: Record<string, TrackingEntry[]>;
 }
 
 /**
@@ -185,30 +190,36 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
     siblingsByJob.set(s.syncoreJobId, arr);
   }
 
-  // Aggregate tracking counts across all sibling POs in one query so the
-  // card doesn't fan out N queries per render.
-  const trackingCountByPoId = new Map<string, number>();
+  // Fetch every tracking row for the sibling POs in one query, then
+  // bucket by poId. We need the full entries (not just counts) so the
+  // expanded sibling row can list each tracking # inline. Order by
+  // createdAt so the most recently entered shows first — matches what
+  // listTrackingForPo does for the Inbound tab.
+  const trackingByPoId = new Map<string, TrackingEntry[]>();
   const siblingPoIds = cgSiblings.map((s) => s.poId);
   if (siblingPoIds.length > 0) {
     const rows = await db
-      .select({
-        poId: schema.poTracking.poId,
-        count: sql<number>`COUNT(*)::int`,
-      })
+      .select()
       .from(schema.poTracking)
       .where(inArray(schema.poTracking.poId, siblingPoIds))
-      .groupBy(schema.poTracking.poId);
-    for (const r of rows) trackingCountByPoId.set(r.poId, Number(r.count));
+      .orderBy(desc(schema.poTracking.createdAt));
+    for (const r of rows) {
+      const arr = trackingByPoId.get(r.poId) ?? [];
+      arr.push(r);
+      trackingByPoId.set(r.poId, arr);
+    }
   }
 
   return decorationPos.map((po) => {
     const jobSiblings = siblingsByJob.get(po.syncoreJobId) ?? [];
     const trackingCountBySibling: Record<string, number> = {};
+    const trackingBySibling: Record<string, TrackingEntry[]> = {};
     let inboundTrackingCount = 0;
     for (const s of jobSiblings) {
-      const n = trackingCountByPoId.get(s.poId) ?? 0;
-      trackingCountBySibling[s.poId] = n;
-      inboundTrackingCount += n;
+      const entries = trackingByPoId.get(s.poId) ?? [];
+      trackingBySibling[s.poId] = entries;
+      trackingCountBySibling[s.poId] = entries.length;
+      inboundTrackingCount += entries.length;
     }
     return {
       po,
@@ -216,6 +227,7 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
       apparelSiblings: jobSiblings,
       inboundTrackingCount,
       trackingCountBySibling,
+      trackingBySibling,
     };
   });
 }

@@ -2,12 +2,15 @@
 
 import { useState, useTransition } from "react";
 import type { MirroredPo } from "@/lib/db/production-po";
+import type { TrackingEntry } from "@/lib/db/receiving";
 import { TrackingForm } from "./TrackingForm";
+import { DeleteTrackingButton } from "./DeleteTrackingButton";
 import { pushTrackingToJobLogAction } from "../_actions";
 
 interface Props {
   siblings: MirroredPo[];
   trackingCountBySibling: Record<string, number>;
+  trackingBySibling: Record<string, TrackingEntry[]>;
   inboundTrackingCount: number;
 }
 
@@ -20,9 +23,14 @@ interface Props {
 export function InboundSiblingsPanel({
   siblings,
   trackingCountBySibling,
+  trackingBySibling,
   inboundTrackingCount,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
+  // Per-sibling "show tracking #s" expansion state. Keyed by poId.
+  const [trackingOpenByPoId, setTrackingOpenByPoId] = useState<
+    Record<string, boolean>
+  >({});
 
   const total = siblings.length;
   if (total === 0) return null;
@@ -66,41 +74,82 @@ export function InboundSiblingsPanel({
         <ul className="mt-2 space-y-1.5 border-l-2 border-[#E3DFD3] pl-2.5">
           {siblings.map((s) => {
             const count = trackingCountBySibling[s.poId] ?? 0;
+            const entries = trackingBySibling[s.poId] ?? [];
+            const trackingOpen = trackingOpenByPoId[s.poId] ?? false;
             return (
-              <li
-                key={s.poId}
-                className="flex flex-wrap items-center gap-x-3 gap-y-1.5"
-              >
-                <div className="flex items-baseline gap-1.5 min-w-[180px]">
-                  <span className="font-semibold text-[#1C2B27]">
-                    PO {s.poNumber ?? s.poId}
-                  </span>
-                  {s.supplierName && (
-                    <span
-                      className="text-[#6B6356] truncate"
-                      title={s.supplierName}
-                    >
-                      {s.supplierName}
+              <li key={s.poId} className="flex flex-col gap-1.5">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  <div className="flex items-baseline gap-1.5 min-w-[180px]">
+                    <span className="font-semibold text-[#1C2B27]">
+                      PO {s.poNumber ?? s.poId}
                     </span>
-                  )}
+                    {s.supplierName && (
+                      <span
+                        className="text-[#6B6356] truncate"
+                        title={s.supplierName}
+                      >
+                        {s.supplierName}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-[11.5px] text-[#6B6356]">
+                    {s.inHandDate && <span>in-hand {s.inHandDate.slice(5)}</span>}
+                    {count > 0 ? (
+                      // Clickable when there are entries to show.
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setTrackingOpenByPoId((prev) => ({
+                            ...prev,
+                            [s.poId]: !trackingOpen,
+                          }))
+                        }
+                        className="rounded px-1.5 py-px font-semibold bg-[#EAF0F8] text-[#3B6FB0] hover:bg-[#DBE6F4] inline-flex items-center gap-1"
+                        aria-expanded={trackingOpen}
+                        title={
+                          trackingOpen ? "Hide tracking #s" : "Show tracking #s"
+                        }
+                      >
+                        {count} tracking
+                        <span className="text-[9px]" aria-hidden>
+                          {trackingOpen ? "▴" : "▾"}
+                        </span>
+                      </button>
+                    ) : (
+                      <span className="rounded px-1.5 py-px font-semibold bg-[#F0EEE6] text-[#6B6356]">
+                        0 tracking
+                      </span>
+                    )}
+                  </div>
+                  <div className="ml-auto flex items-center gap-2">
+                    {count > 0 && <PushButton poId={s.poId} />}
+                    <TrackingForm poId={s.poId} />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-[11.5px] text-[#6B6356]">
-                  {s.inHandDate && <span>in-hand {s.inHandDate.slice(5)}</span>}
-                  <span
-                    className={[
-                      "rounded px-1.5 py-px font-semibold",
-                      count > 0
-                        ? "bg-[#EAF0F8] text-[#3B6FB0]"
-                        : "bg-[#F0EEE6] text-[#6B6356]",
-                    ].join(" ")}
-                  >
-                    {count} tracking
-                  </span>
-                </div>
-                <div className="ml-auto flex items-center gap-2">
-                  {count > 0 && <PushButton poId={s.poId} />}
-                  <TrackingForm poId={s.poId} />
-                </div>
+                {trackingOpen && entries.length > 0 && (
+                  <ul className="ml-[180px] space-y-0.5 text-[11.5px] text-[#3C342B]">
+                    {entries.map((t) => (
+                      <li
+                        key={t.id}
+                        className="flex items-center gap-2 font-mono"
+                      >
+                        <span className="text-[#6B6356] w-9 shrink-0 not-italic font-sans text-[11px] uppercase tracking-wider">
+                          {t.carrier}
+                        </span>
+                        <span className="select-all">{t.trackingNumber}</span>
+                        {t.source === "api" && (
+                          <span
+                            className="text-[9px] uppercase tracking-wider text-[#3B6FB0] font-sans"
+                            title="Auto-populated from vendor API"
+                          >
+                            api
+                          </span>
+                        )}
+                        <DeleteTrackingButton trackingId={t.id} />
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             );
           })}

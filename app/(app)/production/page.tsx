@@ -221,6 +221,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                       apparelSiblings={v.apparelSiblings}
                       inboundTrackingCount={v.inboundTrackingCount}
                       trackingCountBySibling={v.trackingCountBySibling}
+                      trackingBySibling={v.trackingBySibling}
                       department={dept}
                       customer={
                         customerMap.get(v.po.syncoreJobId) ?? null
@@ -265,6 +266,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                           apparelSiblings={v.apparelSiblings}
                           inboundTrackingCount={v.inboundTrackingCount}
                       trackingCountBySibling={v.trackingCountBySibling}
+                      trackingBySibling={v.trackingBySibling}
                           department={dept}
                           customer={
                             customerMap.get(v.po.syncoreJobId) ?? null
