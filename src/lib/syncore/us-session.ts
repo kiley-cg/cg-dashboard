@@ -414,25 +414,54 @@ export async function postFormSnapshot(
     };
   }
 
-  const res = await fetch(snapshot.action, {
-    method: "POST",
-    headers: {
-      ...BROWSER_NAV_HEADERS,
-      "Content-Type": "application/x-www-form-urlencoded",
-      Cookie: cookieHeaderFor(usJar),
-      ...(opts.referer ? { Referer: opts.referer } : {}),
-    },
-    body: sentBody,
-    redirect: "follow",
-  });
-  const respHtml = await res.text();
-  return {
-    status: res.status,
-    finalUrl: res.url,
-    bodyPreview: respHtml.slice(0, 1000),
-    sentBody,
-    dryRun: false,
+  // Form-POST headers differ from the navigation set we use for the
+  // LoginFromV2 chain. Sec-Fetch-Site here is "same-origin" (we're on
+  // us. posting to us.), and Origin is required on cross-page POSTs.
+  const postHeaders: Record<string, string> = {
+    "User-Agent": BROWSER_NAV_HEADERS["User-Agent"],
+    Accept: BROWSER_NAV_HEADERS["Accept"],
+    "Accept-Language": BROWSER_NAV_HEADERS["Accept-Language"],
+    "sec-ch-ua": BROWSER_NAV_HEADERS["sec-ch-ua"],
+    "sec-ch-ua-mobile": BROWSER_NAV_HEADERS["sec-ch-ua-mobile"],
+    "sec-ch-ua-platform": BROWSER_NAV_HEADERS["sec-ch-ua-platform"],
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "Content-Type": "application/x-www-form-urlencoded",
+    Origin: "https://us.ateasesystems.net",
+    Cookie: cookieHeaderFor(usJar),
   };
+  if (opts.referer) postHeaders.Referer = opts.referer;
+
+  // Bound the request — 20s is plenty for an ASP form post and stops
+  // us hitting the Vercel 60s function ceiling on hangs.
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 20_000);
+  try {
+    // redirect: "manual" — we want to *see* what Syncore says first,
+    // not chase the chain. If it redirects to the memo page (the usual
+    // "saved, here's the form again" response), we treat that as
+    // success without re-fetching.
+    const res = await fetch(snapshot.action, {
+      method: "POST",
+      headers: postHeaders,
+      body: sentBody,
+      redirect: "manual",
+      signal: ac.signal,
+    });
+    const respHtml = await res.text();
+    return {
+      status: res.status,
+      finalUrl: res.headers.get("location") ?? snapshot.action,
+      bodyPreview: respHtml.slice(0, 1000),
+      sentBody,
+      dryRun: false,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 interface AttemptLog {
