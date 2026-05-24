@@ -218,6 +218,7 @@ export async function GET(req: Request) {
       return {
         resourceUrl: trace.resource.resourceUrl,
         tokenSuffix: trace.resource.tokenSuffix,
+        attempts: trace.attempts,
         chainHops: trace.hops,
         usJarKeys: Array.from(us.jar.keys()),
         memoUrl,
