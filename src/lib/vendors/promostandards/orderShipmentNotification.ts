@@ -99,9 +99,16 @@ function extractShipments(resp: unknown): OsnShipmentPackage[] {
     return Array.isArray(val) ? val : [val];
   };
 
+  // SanMar's structure is:
+  //   OrderShipmentNotificationArray > OrderShipmentNotification[]
+  //     > SalesOrderArray > SalesOrder[]
+  //     > ShipmentLocationArray > ShipmentLocation[]
+  //     > PackageArray > Package[]   <-- the trackingNumber lives here
+  // That's ~9 levels deep. Allow generously (20) — SOAP responses
+  // don't have cycles, so the only cost is a deeper walk.
   const candidates: unknown[] = [];
   const visit = (node: unknown, depth: number) => {
-    if (depth > 5 || node == null) return;
+    if (depth > 20 || node == null) return;
     if (typeof node !== "object") return;
     const obj = node as Record<string, unknown>;
     for (const [k, v] of Object.entries(obj)) {
@@ -132,10 +139,20 @@ function mapPackage(node: unknown): OsnShipmentPackage | null {
   const obj = node as Record<string, unknown>;
   const tracking = findStr(obj, ["trackingNumber", "TrackingNumber", "tracking_number"]);
   if (!tracking) return null;
+  // SanMar returns BOTH carrier: "UPS" AND shipmentMethod: "Ground" —
+  // we want the carrier (UPS), not the service level (Ground), in the
+  // tracking-card "Carrier" column. Check carrier-named fields first.
   const carrier =
-    findStr(obj, ["shipmentMethod", "ShipmentMethod", "carrier", "Carrier"]) ?? null;
+    findStr(obj, ["carrier", "Carrier", "shipmentMethod", "ShipmentMethod"]) ?? null;
   const shipDate =
-    findStr(obj, ["shipDate", "ShipDate", "shipment_date", "shipDateTime"]) ?? null;
+    findStr(obj, [
+      "shipmentDate",
+      "ShipmentDate",
+      "shipDate",
+      "ShipDate",
+      "shipment_date",
+      "shipDateTime",
+    ]) ?? null;
   const eta =
     findStr(obj, [
       "expectedDeliveryDate",
