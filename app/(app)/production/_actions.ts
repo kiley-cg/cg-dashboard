@@ -7,6 +7,7 @@ import { db, schema } from "@/lib/db/client";
 import { hasRoleAccess } from "@/lib/roles";
 import { SyncoreError } from "@/lib/syncore/client";
 import { WebUiError, addJobTrackerEntry } from "@/lib/syncore/webui";
+import { pushPoTrackingToJobLog } from "@/lib/syncore/job-tracker-push";
 import { postPurchaseOrderManually } from "@/lib/syncore/orders";
 import {
   addTracking,
@@ -285,7 +286,7 @@ export async function addTrackingAction(
   // is down or rejects the call, the local add still succeeded; we
   // surface the sync error inline so the user can retry via the manual
   // "→ Job Log" button.
-  const syncResult = await postTrackingToJobLog(poId);
+  const syncResult = await pushPoTrackingToJobLog(poId);
 
   revalidatePath("/production");
   if (syncResult.ok) {
@@ -368,72 +369,9 @@ export async function saveProductionNotes(formData: FormData): Promise<void> {
   revalidatePath("/production/notes");
 }
 
-/**
- * Internal: format and push a PO's tracking #s to its Syncore Job Log.
- * Returns ActionResult. Used by both the explicit "→ Job Log" button
- * (pushTrackingToJobLogAction) AND auto-fired from addTrackingAction so
- * the floor doesn't need a second click.
- */
-async function postTrackingToJobLog(poId: string): Promise<ActionResult> {
-  const [poRow, trackingEntries] = await Promise.all([
-    db
-      .select({
-        syncoreJobId: schema.productionPoMirror.syncoreJobId,
-        poNumber: schema.productionPoMirror.poNumber,
-        supplierName: schema.productionPoMirror.supplierName,
-      })
-      .from(schema.productionPoMirror)
-      .where(eq(schema.productionPoMirror.poId, poId))
-      .limit(1)
-      .then((rows) => rows[0] ?? null),
-    listTrackingForPo(poId),
-  ]);
-
-  if (!poRow) {
-    return { ok: false, error: `PO ${poId} not found in mirror` };
-  }
-  if (trackingEntries.length === 0) {
-    return { ok: false, error: "No tracking numbers entered yet for this PO" };
-  }
-
-  const poLabel =
-    poRow.poNumber != null ? `${poRow.syncoreJobId}-${poRow.poNumber}` : poId;
-  const carriersSeen = new Set(
-    trackingEntries.map((t) => t.carrier).filter(Boolean),
-  );
-  const carrierText =
-    carriersSeen.size === 1
-      ? Array.from(carriersSeen)[0]
-      : carriersSeen.size > 1
-        ? "mixed"
-        : "carrier unknown";
-  const supplierTail = poRow.supplierName ? ` (${poRow.supplierName})` : "";
-
-  const header = `Tracking — ${carrierText} — PO ${poLabel}${supplierTail}`;
-  const body = trackingEntries
-    .map((t) => `  ${t.carrier}: ${t.trackingNumber}`)
-    .join("\n");
-  const description = `${header}\n${body}`;
-
-  try {
-    const ok = await addJobTrackerEntry({
-      jobId: poRow.syncoreJobId,
-      description,
-    });
-    if (!ok) {
-      return { ok: false, error: "Syncore returned Result=false" };
-    }
-    return { ok: true };
-  } catch (err) {
-    if (err instanceof WebUiError) {
-      return { ok: false, error: err.message, status: err.status };
-    }
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
+// postTrackingToJobLog now lives in src/lib/syncore/job-tracker-push.ts
+// (pushPoTrackingToJobLog) so the Phase-5 cron can reuse the same
+// formatting + auth path without server-action bundling weirdness.
 
 /**
  * Manual "→ Job Log" trigger — useful as a retry escape hatch when
@@ -448,5 +386,5 @@ export async function pushTrackingToJobLogAction(
   if (typeof poId !== "string" || !poId) {
     return { ok: false, error: "Missing poId" };
   }
-  return await postTrackingToJobLog(poId);
+  return await pushPoTrackingToJobLog(poId);
 }
