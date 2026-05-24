@@ -162,3 +162,38 @@ export async function listTrackingForPo(poId: string): Promise<TrackingEntry[]> 
     .where(eq(schema.poTracking.poId, poId))
     .orderBy(desc(schema.poTracking.createdAt));
 }
+
+/**
+ * Insert a tracking row only if the same (poId, trackingNumber) pair
+ * isn't already on file. Returns true if a new row was inserted.
+ *
+ * Used by the Phase 5 vendor-poll cron — running the cron multiple
+ * times on the same PO must not duplicate entries.
+ */
+export async function addTrackingIfMissing(args: {
+  poId: string;
+  carrier: string;
+  trackingNumber: string;
+  source: "manual" | "api";
+}): Promise<boolean> {
+  const existing = await db
+    .select({ id: schema.poTracking.id })
+    .from(schema.poTracking)
+    .where(
+      and(
+        eq(schema.poTracking.poId, args.poId),
+        eq(schema.poTracking.trackingNumber, args.trackingNumber),
+      ),
+    )
+    .limit(1);
+  if (existing.length > 0) return false;
+
+  await db.insert(schema.poTracking).values({
+    poId: args.poId,
+    carrier: args.carrier,
+    trackingNumber: args.trackingNumber,
+    source: args.source,
+    enteredByUserId: null,
+  });
+  return true;
+}
