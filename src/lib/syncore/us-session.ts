@@ -220,6 +220,219 @@ export async function fetchMemoFormHtml(
   return { status: res.status, html, finalUrl: res.url };
 }
 
+// ---------------------------------------------------------------------------
+// Form snapshot + POST (Step 2)
+// ---------------------------------------------------------------------------
+
+export interface FormSnapshot {
+  /** Absolute URL of the form's action attribute. */
+  action: string;
+  /** Always "POST" — the only method Syncore's classic-ASP forms use. */
+  method: string;
+  /**
+   * URL-encodable body of the form as it would submit unchanged. Repeats
+   * for fields with the same name (e.g. POItemID appears once per row).
+   * Pass through `overrides` in `postFormSnapshot` to mutate values.
+   */
+  fields: URLSearchParams;
+}
+
+function parseSelectedOption(selectInnerHtml: string): string {
+  // First try: option with selected attr
+  const sel = selectInnerHtml.match(
+    /<option\b[^>]*\bselected\b[^>]*?\bvalue\s*=\s*["']([^"']*)["']/i,
+  );
+  if (sel) return sel[1];
+  // Fallback: first option's value
+  const first = selectInnerHtml.match(
+    /<option\b[^>]*\bvalue\s*=\s*["']([^"']*)["']/i,
+  );
+  return first?.[1] ?? "";
+}
+
+/**
+ * Capture the current form state as a URLSearchParams body. Defaults to
+ * targeting the named form `rmAdd` (the receiving memo's real form);
+ * pass `formName` for other us. pages.
+ *
+ * What we capture:
+ *  - All `<input>` tags: name + value, EXCEPT submit/button/image inputs
+ *    (browsers only include the clicked submit's name/value, not all of them)
+ *  - Checkboxes: only included if `checked` attr is present (none are by default)
+ *  - Selects: the `<option selected>` value, or the first option as fallback
+ *  - Textareas: the text content between tags
+ */
+export function parseFormSnapshot(
+  html: string,
+  opts: { formName?: string; formIndex?: number } = {},
+): FormSnapshot {
+  // Find the target form's full HTML by scanning for `<form ...>...</form>`.
+  const formRx = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
+  let target: { attrs: string; inner: string } | null = null;
+  let idx = 0;
+  let m: RegExpExecArray | null;
+  while ((m = formRx.exec(html)) !== null) {
+    const attrs = m[1];
+    const inner = m[2];
+    const hasAction = /\baction\s*=/i.test(attrs);
+    if (opts.formName) {
+      if (new RegExp(`\\bname\\s*=\\s*["']${opts.formName}["']`, "i").test(attrs)) {
+        target = { attrs, inner };
+        break;
+      }
+    } else if (opts.formIndex != null) {
+      if (idx === opts.formIndex) {
+        target = { attrs, inner };
+        break;
+      }
+    } else if (hasAction && target == null) {
+      // Default: first form with a non-empty action — that's the real one.
+      target = { attrs, inner };
+      break;
+    }
+    idx++;
+  }
+  if (!target) {
+    throw new Error("parseFormSnapshot: no matching form found");
+  }
+
+  const actionAttr =
+    target.attrs.match(/\baction\s*=\s*["']([^"']+)["']/i)?.[1] ?? "";
+  const methodAttr =
+    target.attrs.match(/\bmethod\s*=\s*["']([^"']+)["']/i)?.[1] ?? "post";
+  // Resolve relative actions against the memo's us. host.
+  const action = actionAttr.startsWith("http")
+    ? actionAttr
+    : `${US}/porder/${actionAttr.replace(/^\/+/, "")}`;
+
+  const fields = new URLSearchParams();
+
+  // 1. Inputs — every <input ...> in form scope.
+  for (const inp of target.inner.matchAll(/<input\b([^>]*)>/gi)) {
+    const tagAttrs = inp[1];
+    const name = tagAttrs.match(/\bname\s*=\s*["']([^"']+)["']/i)?.[1];
+    const type =
+      tagAttrs.match(/\btype\s*=\s*["']([^"']*)["']/i)?.[1]?.toLowerCase() ??
+      "text";
+    if (!name) continue;
+    if (type === "submit" || type === "button" || type === "image" || type === "reset") {
+      continue;
+    }
+    if (type === "checkbox" || type === "radio") {
+      // Only included when checked. Default state has no `checked` attr.
+      if (!/\bchecked\b/i.test(tagAttrs)) continue;
+    }
+    const value = tagAttrs.match(/\bvalue\s*=\s*["']([^"']*)["']/i)?.[1] ?? "";
+    fields.append(name, value);
+  }
+
+  // 2. Selects — find selected option, fallback to first option.
+  for (const sel of target.inner.matchAll(
+    /<select\b([^>]*)>([\s\S]*?)<\/select>/gi,
+  )) {
+    const selAttrs = sel[1];
+    const inner = sel[2];
+    const name = selAttrs.match(/\bname\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (!name) continue;
+    fields.append(name, parseSelectedOption(inner));
+  }
+
+  // 3. Textareas — body content (HTML-decoded basics only — Syncore's
+  //    classic ASP doesn't HTML-encode <textarea> content as far as
+  //    we've seen, so a pass-through is fine for round-trip).
+  for (const ta of target.inner.matchAll(
+    /<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/gi,
+  )) {
+    const taAttrs = ta[1];
+    const inner = ta[2];
+    const name = taAttrs.match(/\bname\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (!name) continue;
+    fields.append(name, inner);
+  }
+
+  return { action, method: methodAttr.toUpperCase(), fields };
+}
+
+export interface PostResult {
+  /** HTTP status of the POST response. */
+  status: number;
+  /** Final URL after any redirects (Syncore typically renders the memo again). */
+  finalUrl: string;
+  /** First 1000 chars of the response body for inspection. */
+  bodyPreview: string;
+  /** The URL-encoded body we sent (or would have sent in dryRun). */
+  sentBody: string;
+  /** When dryRun=true, no network call was made. */
+  dryRun: boolean;
+}
+
+/**
+ * POST a form snapshot back to its action URL. Default is **dry run** —
+ * no network call, returns the body that *would* be sent. Pass
+ * `{ live: true }` to actually fire it. Always dry-run when in doubt;
+ * Syncore's memo POST is destructive (it writes to received-qty fields).
+ *
+ * `overrides` mutates fields by name:
+ *   - string  → replace all existing values for that name
+ *   - string[] → replace + use multiple values (for `updPOList`-style fields)
+ *   - null → delete the field entirely
+ *
+ * To mark a PO line item for update on the receiving memo, the browser
+ * checks the `updPOList` checkbox for that item — equivalent here is
+ * `overrides: { updPOList: ["176629842", "176629845"] }` (one entry
+ * per item to update).
+ */
+export async function postFormSnapshot(
+  usJar: Map<string, string>,
+  snapshot: FormSnapshot,
+  overrides: Record<string, string | string[] | null> = {},
+  opts: { live?: boolean; referer?: string } = {},
+): Promise<PostResult> {
+  const body = new URLSearchParams();
+  for (const [k, v] of snapshot.fields) body.append(k, v);
+  for (const [k, v] of Object.entries(overrides)) {
+    // Clear existing entries for this key
+    body.delete(k);
+    if (v == null) continue;
+    if (Array.isArray(v)) {
+      for (const x of v) body.append(k, x);
+    } else {
+      body.append(k, v);
+    }
+  }
+  const sentBody = body.toString();
+
+  if (!opts.live) {
+    return {
+      status: 0,
+      finalUrl: snapshot.action,
+      bodyPreview: "(dry run — no request sent)",
+      sentBody,
+      dryRun: true,
+    };
+  }
+
+  const res = await fetch(snapshot.action, {
+    method: "POST",
+    headers: {
+      ...BROWSER_NAV_HEADERS,
+      "Content-Type": "application/x-www-form-urlencoded",
+      Cookie: cookieHeaderFor(usJar),
+      ...(opts.referer ? { Referer: opts.referer } : {}),
+    },
+    body: sentBody,
+    redirect: "follow",
+  });
+  const respHtml = await res.text();
+  return {
+    status: res.status,
+    finalUrl: res.url,
+    bodyPreview: respHtml.slice(0, 1000),
+    sentBody,
+    dryRun: false,
+  };
+}
+
 interface AttemptLog {
   attempt: number;
   tokenSuffix: string | null;
