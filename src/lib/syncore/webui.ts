@@ -239,6 +239,12 @@ export interface WebUiFetchInit {
   // Anything passed here is appended as data[key]=value (PHP/.NET-style).
   bracketed?: WebUiSearchParams;
   body?: unknown;
+  // application/x-www-form-urlencoded body. Mutually exclusive with `body`
+  // (which JSON-encodes). Some Syncore endpoints (Job/AddTrackerEntryAsync,
+  // legacy ASP.NET MVC AJAX actions) only accept form-encoded.
+  formBody?: Record<string, string | number | boolean>;
+  // Override the default Referer. Some Syncore endpoints check Origin/Referer.
+  referer?: string;
 }
 
 export async function webuiFetch<T = unknown>(
@@ -254,14 +260,27 @@ export async function webuiFetch<T = unknown>(
       Accept: "application/json",
       "X-Requested-With": "XMLHttpRequest",
       Cookie: session.cookie,
+      Origin: WEB_BASE,
     };
-    if (init.body !== undefined) {
+    if (init.referer) headers["Referer"] = init.referer;
+
+    let bodyStr: string | undefined;
+    if (init.formBody !== undefined) {
+      const usp = new URLSearchParams();
+      for (const [k, v] of Object.entries(init.formBody)) {
+        usp.append(k, String(v));
+      }
+      bodyStr = usp.toString();
+      headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
+    } else if (init.body !== undefined) {
+      bodyStr = JSON.stringify(init.body);
       headers["Content-Type"] = "application/json";
     }
+
     return fetch(url, {
       method: init.method ?? "GET",
       headers,
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: bodyStr,
       cache: "no-store",
       redirect: "manual",
     });
@@ -357,4 +376,58 @@ export async function webuiFetchRaw(
   });
   const body = await res.text().catch(() => "");
   return { status: res.status, headers, body };
+}
+
+// ---------------------------------------------------------------------------
+// Job Tracker entries (Syncore's per-job audit log)
+// ---------------------------------------------------------------------------
+
+/**
+ * Job Log entry color codes observed in Syncore's UI:
+ *   0 = gray   — system messages (status changes, file attachments)
+ *   1 = orange — production/tracking notes (this is what users pick for
+ *                tracking-related entries; the auto UPS Tracking Import
+ *                rows are also color 1)
+ *   2 = green  — accounting / invoice rows
+ *   4 = purple — CSR comments / instructions
+ * Default to 1 for tracking entries.
+ */
+export const JOB_LOG_COLOR = {
+  gray: 0,
+  orange: 1,
+  green: 2,
+  purple: 4,
+} as const;
+
+export interface AddJobTrackerEntryResult {
+  Result: boolean;
+  Message: string;
+}
+
+/**
+ * Append an entry to a Syncore job's Job Log (the per-job audit feed
+ * everyone at CG looks at). Endpoint discovered from HAR capture; see
+ * docs/syncore-us-writeback.md for the broader Syncore integration notes.
+ *
+ * Returns true on success. Throws on auth / network failure.
+ */
+export async function addJobTrackerEntry(args: {
+  jobId: string | number;
+  description: string;
+  color?: number;
+}): Promise<boolean> {
+  const jobId = String(args.jobId);
+  const result = await webuiFetch<AddJobTrackerEntryResult>(
+    "/Job/AddTrackerEntryAsync",
+    {
+      method: "POST",
+      formBody: {
+        JobId: jobId,
+        TextColor: args.color ?? JOB_LOG_COLOR.orange,
+        Description: args.description,
+      },
+      referer: `${WEB_BASE}/Job/Details/${jobId}`,
+    },
+  );
+  return result?.Result === true;
 }
