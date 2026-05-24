@@ -79,15 +79,20 @@ function extractAttr(tag: string, attr: string): string | null {
 function parseInputsInRange(html: string, start: number, end: number): InputBlueprint[] {
   const slice = html.slice(start, end);
   const out: InputBlueprint[] = [];
-  // Self-closing or implicit-close tags: <input>, plus paired <select>/<textarea>/<button>
+  // Self-closing tags: <input>. Capture even if no `name` attr — submit
+  // buttons often have only a value (e.g. <input type="submit" value="Save">),
+  // and we need to see them to know how Save is wired.
   for (const m of slice.matchAll(/<input\b[^>]*>/gi)) {
     const tag = m[0];
+    const type = extractAttr(tag, "type");
     const name = extractAttr(tag, "name");
-    if (!name) continue;
+    if (!name && !(type === "submit" || type === "button" || type === "image")) {
+      continue;
+    }
     out.push({
       tag: "input",
-      name,
-      type: extractAttr(tag, "type"),
+      name: name ?? "",
+      type,
       value: extractAttr(tag, "value"),
       snippet: tag.length > 200 ? tag.slice(0, 200) + "…" : tag,
     });
@@ -116,13 +121,13 @@ function parseInputsInRange(html: string, start: number, end: number): InputBlue
       snippet: tag.length > 200 ? tag.slice(0, 200) + "…" : tag,
     });
   }
-  for (const m of slice.matchAll(/<button\b[^>]*>/gi)) {
+  // <button> — capture ALL, with or without name. Save buttons are often
+  // unnamed and rely on a generic onclick to set the form's action.
+  for (const m of slice.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/gi)) {
     const tag = m[0];
-    const name = extractAttr(tag, "name");
-    if (!name) continue;
     out.push({
       tag: "button",
-      name,
+      name: extractAttr(tag, "name") ?? "",
       type: extractAttr(tag, "type"),
       value: extractAttr(tag, "value"),
       snippet: tag.length > 200 ? tag.slice(0, 200) + "…" : tag,
@@ -227,6 +232,9 @@ export async function GET(req: Request) {
           finalUrl: memo.finalUrl,
           bodyLength: memo.html.length,
           bodyPreview: memo.html.slice(0, 600),
+          // Save button + form footer is at the bottom of the document
+          // for ASP forms — surface the tail so we can find the trigger.
+          bodyTail: memo.html.slice(-2500),
           form: parseFormSummary(memo.html),
         },
       };
