@@ -59,9 +59,13 @@ async function handler(req: Request): Promise<NextResponse> {
   }
 
   const url = new URL(req.url);
+  // Default to a sweep that comfortably covers all open apparel POs in
+  // the mirror today (~300-400). Cap at 1000 so a malformed query can't
+  // pull the entire history. The scheduled 2x-daily cron runs without
+  // params and gets the default.
   const limit = Math.min(
-    Number(url.searchParams.get("limit") ?? "100") || 100,
-    500,
+    Number(url.searchParams.get("limit") ?? "500") || 500,
+    1000,
   );
 
   const startedAt = Date.now();
@@ -173,11 +177,11 @@ async function handler(req: Request): Promise<NextResponse> {
   };
 
   // Bounded-concurrency runner — fixed pool of workers pulling from a
-  // shared queue. Cap at 8: SanMar's WSDL load is cached after the
-  // first call, so most work is one HTTP round-trip per PO; 8 in
-  // flight is well below any reasonable rate limit and keeps the
-  // route under Vercel's edge timeout.
-  const CONCURRENCY = 8;
+  // shared queue. WSDL is cached after the first SOAP client load, so
+  // most per-PO cost is one HTTP round-trip. 16 in flight keeps the
+  // route under Vercel's edge timeout at limit=500 and is well below
+  // any plausible vendor rate limit.
+  const CONCURRENCY = 16;
   let nextIndex = 0;
   const worker = async () => {
     while (true) {
