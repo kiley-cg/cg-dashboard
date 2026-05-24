@@ -180,21 +180,36 @@ export async function chaseLoginFromV2(
 }
 
 /**
+ * Extract the actual memo URL from a LoginFromV2 resourceUrl's
+ * `RequestURL` query param. Syncore encodes that target with '!' as the
+ * parameter separator (e.g. `ActionCMD=Edit!Corp=0!BranchID=97!...`)
+ * instead of '&'; we translate back so it's a real query string.
+ *
+ * Following the chain to the memo URL drops the `pg=` target around
+ * hop 4 and lands on the index.asp frameset (round 8/10 wall). The way
+ * forward is: use the chain only to mint UserID + Token cookies, then
+ * GET this URL directly.
+ */
+export function memoUrlFromResource(resourceUrl: string): string | null {
+  const u = new URL(resourceUrl);
+  const requestUrl = u.searchParams.get("RequestURL");
+  if (!requestUrl) return null;
+  const normalized = requestUrl.replace(/!/g, "&");
+  return normalized.startsWith("http") ? normalized : `${US}${normalized}`;
+}
+
+/**
  * GET the receiving memo form HTML for a PO. Caller must have already
  * established a us. session (jar holds UserID + Token cookies) via
- * `withFreshSyncoreSession` or `chaseLoginFromV2`.
- *
- * The memo URL takes ActionCMD=Edit + the POItemID list as a query
- * string. We don't yet know the canonical params — Step 2 will parse
- * the actual form to find out. For now the resourceUrl from
- * memostatuses redirects directly to the right memo page.
+ * `withFreshSyncoreSession` or `chaseLoginFromV2`. Pass the URL from
+ * `memoUrlFromResource` — fetching the bare LoginFromV2 resourceUrl
+ * here would redirect through the chain again and land on the frameset.
  */
 export async function fetchMemoFormHtml(
   usJar: Map<string, string>,
-  memoPath: string,
+  memoUrl: string,
 ): Promise<{ status: number; html: string; finalUrl: string }> {
-  const url = memoPath.startsWith("http") ? memoPath : `${US}${memoPath}`;
-  const res = await fetch(url, {
+  const res = await fetch(memoUrl, {
     headers: {
       ...BROWSER_NAV_HEADERS,
       Cookie: cookieHeaderFor(usJar),
