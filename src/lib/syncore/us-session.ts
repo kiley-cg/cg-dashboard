@@ -220,9 +220,34 @@ export async function fetchMemoFormHtml(
   return { status: res.status, html, finalUrl: res.url };
 }
 
+interface AttemptLog {
+  attempt: number;
+  tokenSuffix: string | null;
+  jarKeys: string[];
+  outcome: "ok" | "dead-token" | "error";
+  errorMessage?: string;
+}
+
+export interface SessionResult {
+  resource: MemoResourceInfo;
+  hops: SessionTrace["hops"];
+  attempts: AttemptLog[];
+}
+
 /**
  * Glue: fresh www login + memostatuses → resourceUrl → LoginFromV2 chase
  * → callback with the authed us. jar. Use this for any us.-host call.
+ *
+ * Token-dead retry (option B from May 24 session decision):
+ *
+ *   Syncore mints a fresh Token only on its own (probably time-based)
+ *   cadence — rapid back-to-back logins return the same Token, and once
+ *   consumed by a successful chain it's dead. On a dead-token attempt
+ *   we wait + fresh-login again, hoping Syncore has rotated by then.
+ *
+ *   Default 3 attempts with 0/3/8 second backoffs. Each attempt does
+ *   a full fresh-login → memostatuses → chase so we're not reusing
+ *   anything across retries.
  *
  * `bootstrapPoId` doubles as the PO whose memo resourceUrl we use to
  * mint the session AND is typically the PO the caller wants to act on,
@@ -231,30 +256,68 @@ export async function fetchMemoFormHtml(
  */
 export async function withFreshSyncoreSession<T>(
   bootstrapPoId: string,
-  fn: (
-    us: UsSession,
-    trace: { resource: MemoResourceInfo; hops: SessionTrace["hops"] },
-  ) => Promise<T>,
+  fn: (us: UsSession, trace: SessionResult) => Promise<T>,
+  opts: { maxAttempts?: number; backoffsMs?: number[] } = {},
 ): Promise<T> {
-  const wwwJar = await freshWwwLogin();
-  const resource = await getMemoResourceUrl(wwwJar, bootstrapPoId);
-  const { jar, hops } = await chaseLoginFromV2(resource.resourceUrl);
+  const maxAttempts = opts.maxAttempts ?? 3;
+  const backoffsMs = opts.backoffsMs ?? [0, 3000, 8000];
+  const attempts: AttemptLog[] = [];
+  let lastResource: MemoResourceInfo | null = null;
+  let lastHops: SessionTrace["hops"] = [];
 
-  // Sanity check: a successful chase must drop both UserID and Token
-  // cookies on us. Without them, subsequent us. calls will land on
-  // /Login.asp?expired=1 (round 4's failure mode).
-  if (!jar.has("UserID") && !jar.has("userid")) {
-    throw new WebUiError(
-      "LoginFromV2 chain did not set UserID cookie on us. — check BROWSER_NAV_HEADERS",
-      0,
-      JSON.stringify({ hops, jarKeys: Array.from(jar.keys()) }),
-    );
+  for (let i = 0; i < maxAttempts; i++) {
+    const wait = backoffsMs[i] ?? backoffsMs[backoffsMs.length - 1] ?? 0;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+
+    let resource: MemoResourceInfo;
+    let chase: { jar: Map<string, string>; hops: SessionTrace["hops"] };
+    try {
+      const wwwJar = await freshWwwLogin();
+      resource = await getMemoResourceUrl(wwwJar, bootstrapPoId);
+      chase = await chaseLoginFromV2(resource.resourceUrl);
+    } catch (err) {
+      attempts.push({
+        attempt: i + 1,
+        tokenSuffix: null,
+        jarKeys: [],
+        outcome: "error",
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+      if (i === maxAttempts - 1) throw err;
+      continue;
+    }
+
+    lastResource = resource;
+    lastHops = chase.hops;
+    const jarKeys = Array.from(chase.jar.keys());
+    const hasUserId = chase.jar.has("UserID") || chase.jar.has("userid");
+
+    if (hasUserId) {
+      attempts.push({
+        attempt: i + 1,
+        tokenSuffix: resource.tokenSuffix,
+        jarKeys,
+        outcome: "ok",
+      });
+      const us: UsSession = {
+        jar: chase.jar,
+        expiresAt: Date.now() + 20 * 60 * 1000,
+        bootstrapPoId,
+      };
+      return await fn(us, { resource, hops: chase.hops, attempts });
+    }
+
+    attempts.push({
+      attempt: i + 1,
+      tokenSuffix: resource.tokenSuffix,
+      jarKeys,
+      outcome: "dead-token",
+    });
   }
 
-  const us: UsSession = {
-    jar,
-    expiresAt: Date.now() + 20 * 60 * 1000,
-    bootstrapPoId,
-  };
-  return await fn(us, { resource, hops });
+  throw new WebUiError(
+    `LoginFromV2 chain did not set UserID cookie after ${maxAttempts} attempts — Syncore Token rotation hasn't happened in window`,
+    0,
+    JSON.stringify({ attempts, lastHops, lastTokenSuffix: lastResource?.tokenSuffix ?? null }),
+  );
 }
