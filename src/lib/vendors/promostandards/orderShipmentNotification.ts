@@ -174,6 +174,13 @@ function findStr(obj: Record<string, unknown>, keys: string[]): string | null {
     const v = obj[k];
     if (typeof v === "string" && v.trim()) return v.trim();
     if (typeof v === "number") return String(v);
+    // SanMar returns shipmentDate as a JS Date object (the soap library
+    // deserializes xs:dateTime that way). toJSON would have rendered it
+    // as ISO 8601 if we'd JSON.stringify'd raw, but findStr runs before
+    // that — so handle Date explicitly here.
+    if (v instanceof Date && !Number.isNaN(v.getTime())) {
+      return v.toISOString();
+    }
   }
   return null;
 }
