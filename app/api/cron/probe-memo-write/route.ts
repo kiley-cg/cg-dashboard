@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import {
   withFreshSyncoreSession,
   fetchMemoFormHtml,
+  memoUrlFromResource,
 } from "@/lib/syncore/us-session";
 import { WebUiError } from "@/lib/syncore/webui";
 
@@ -73,12 +74,12 @@ function parseFormSummary(html: string): FormSummary {
     firstFormMethod: method,
     hiddenInputNames,
     bodyTitle: title,
-    // Receiving memo specifics — landed-on-form markers from round 10's
-    // captured HTML. Adjust if the live page shifts.
+    // The frameset page contains "receivingMemo.asp" as a JS string,
+    // so that marker alone is a false positive. Require something only
+    // the real form HTML has: POItemID inputs or the memo's submit row.
     looksLikeMemo:
-      /receivingMemo\.asp/i.test(html) ||
       /name=["']?POItemID/i.test(html) ||
-      /Receiving\s+Memo/i.test(html),
+      /name=["']?ActionCMD["']?\s+value=["']?Save/i.test(html),
     // Index.asp is the legacy frameset wrapper — landing here means
     // LoginFromV2 dropped the pg= target.
     looksLikeFrameset: /<frameset|src=["'][^"']*index\.asp/i.test(html),
@@ -104,12 +105,19 @@ export async function GET(req: Request) {
 
   try {
     const result = await withFreshSyncoreSession(poId, async (us, trace) => {
-      const memo = await fetchMemoFormHtml(us.jar, trace.resource.resourceUrl);
+      const memoUrl = memoUrlFromResource(trace.resource.resourceUrl);
+      if (!memoUrl) {
+        throw new Error(
+          "Could not extract RequestURL from resourceUrl — memostatuses response shape may have changed",
+        );
+      }
+      const memo = await fetchMemoFormHtml(us.jar, memoUrl);
       return {
         resourceUrl: trace.resource.resourceUrl,
         tokenSuffix: trace.resource.tokenSuffix,
         chainHops: trace.hops,
         usJarKeys: Array.from(us.jar.keys()),
+        memoUrl,
         memo: {
           finalStatus: memo.status,
           finalUrl: memo.finalUrl,
