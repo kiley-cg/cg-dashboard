@@ -5,8 +5,12 @@
 // Usage:
 //   GET ?vendor=sanmar&poNumber=PO-NUMBER-AS-SENT-TO-VENDOR
 //
-// vendor: sanmar | ss | cb (only sanmar wired today — adding S&S + C&B
-//   after sanmar's response shape is confirmed)
+// Iteration helper for SanMar — pass ?wsdl=<full-WSDL-URL> to override
+// the default WSDL URL guess without redeploying. The override is also
+// passed to the SOAP client so we can probe alternate bindings until we
+// find the one SanMar actually publishes.
+//
+// vendor: sanmar | ss | cb (only sanmar wired today)
 
 import { NextResponse } from "next/server";
 import { fetchSanMarTracking } from "@/lib/vendors/sanmar/tracking";
@@ -34,6 +38,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const vendor = url.searchParams.get("vendor");
   const poNumber = url.searchParams.get("poNumber");
+  const wsdlOverride = url.searchParams.get("wsdl");
   if (!vendor) {
     return NextResponse.json(
       { ok: false, error: "missing ?vendor= (sanmar | ss | cb)" },
@@ -52,7 +57,7 @@ export async function GET(req: Request) {
     let shipments;
     switch (vendor) {
       case "sanmar":
-        shipments = await fetchSanMarTracking(poNumber);
+        shipments = await fetchSanMarTracking(poNumber, { wsdlUrl: wsdlOverride ?? undefined });
         break;
       case "ss":
       case "cb":
@@ -73,6 +78,7 @@ export async function GET(req: Request) {
       ok: true,
       vendor,
       poNumber,
+      wsdlUrl: wsdlOverride ?? "(default)",
       shipmentCount: shipments.length,
       shipments,
       durationMs: Date.now() - startedAt,
@@ -83,8 +89,8 @@ export async function GET(req: Request) {
         ok: false,
         vendor,
         poNumber,
+        wsdlUrl: wsdlOverride ?? "(default)",
         error: err instanceof Error ? err.message : String(err),
-        // SOAP faults carry useful detail on err.root or err.response
         detail:
           err && typeof err === "object" && "root" in err
             ? (err as { root: unknown }).root
