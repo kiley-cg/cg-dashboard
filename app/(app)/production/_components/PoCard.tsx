@@ -5,6 +5,7 @@ import type {
   MirroredPo,
   PoScheduleState,
 } from "@/lib/db/production-po";
+import type { TrackingEntry } from "@/lib/db/receiving";
 import type { Department } from "@/lib/syncore/production";
 import { ScheduleControl } from "./ScheduleControl";
 import { FloorStatusControl } from "./FloorStatusControl";
@@ -66,6 +67,7 @@ interface Props {
   apparelSiblings: MirroredPo[];
   inboundTrackingCount: number;
   trackingCountBySibling: Record<string, number>;
+  trackingBySibling: Record<string, TrackingEntry[]>;
   department: Department;
   customer: string | null; // best-effort, may be null
   weekDays: DayOption[]; // Mon-Fri of the displayed week
@@ -77,6 +79,7 @@ export function PoCard({
   apparelSiblings,
   inboundTrackingCount,
   trackingCountBySibling,
+  trackingBySibling,
   department,
   weekDays,
   customer,
@@ -145,6 +148,7 @@ export function PoCard({
         <InboundSiblingsPanel
           siblings={apparelSiblings}
           trackingCountBySibling={trackingCountBySibling}
+          trackingBySibling={trackingBySibling}
           inboundTrackingCount={inboundTrackingCount}
         />
 
