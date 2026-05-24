@@ -150,3 +150,15 @@ export async function unmarkReceived(poId: string): Promise<void> {
       },
     });
 }
+
+/**
+ * All tracking entries for a PO, newest first. Used by the "Push to
+ * Job Log" action to summarize tracking numbers in one Syncore entry.
+ */
+export async function listTrackingForPo(poId: string): Promise<TrackingEntry[]> {
+  return await db
+    .select()
+    .from(schema.poTracking)
+    .where(eq(schema.poTracking.poId, poId))
+    .orderBy(desc(schema.poTracking.createdAt));
+}

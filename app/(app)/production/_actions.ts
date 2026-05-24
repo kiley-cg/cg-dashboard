@@ -6,11 +6,12 @@ import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
 import { hasRoleAccess } from "@/lib/roles";
 import { SyncoreError } from "@/lib/syncore/client";
-import { WebUiError } from "@/lib/syncore/webui";
+import { WebUiError, addJobTrackerEntry } from "@/lib/syncore/webui";
 import { postPurchaseOrderManually } from "@/lib/syncore/orders";
 import {
   addTracking,
   deleteTracking,
+  listTrackingForPo,
   markReceived,
   unmarkReceived,
 } from "@/lib/db/receiving";
@@ -342,4 +343,90 @@ export async function saveProductionNotes(formData: FormData): Promise<void> {
 
   revalidatePath("/production");
   revalidatePath("/production/notes");
+}
+
+/**
+ * Push a PO's accumulated tracking numbers to its Syncore Job Log as a
+ * single entry. This is the user-facing "Send to Syncore" / "Push to
+ * Job Log" button on each apparel-sibling row.
+ *
+ * Returns ActionResult so the client can surface success/failure
+ * inline; throws only on unauthorized access. Does NOT throw on
+ * Syncore failures — those come back as { ok: false, error }.
+ */
+export async function pushTrackingToJobLogAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  await authorize();
+
+  const poId = formData.get("poId");
+  if (typeof poId !== "string" || !poId) {
+    return { ok: false, error: "Missing poId" };
+  }
+
+  // Look up the PO + tracking entries in parallel.
+  const [poRow, trackingEntries] = await Promise.all([
+    db
+      .select({
+        syncoreJobId: schema.productionPoMirror.syncoreJobId,
+        poNumber: schema.productionPoMirror.poNumber,
+        supplierName: schema.productionPoMirror.supplierName,
+      })
+      .from(schema.productionPoMirror)
+      .where(eq(schema.productionPoMirror.poId, poId))
+      .limit(1)
+      .then((rows) => rows[0] ?? null),
+    listTrackingForPo(poId),
+  ]);
+
+  if (!poRow) {
+    return { ok: false, error: `PO ${poId} not found in mirror` };
+  }
+  if (trackingEntries.length === 0) {
+    return {
+      ok: false,
+      error: "No tracking numbers entered yet for this PO",
+    };
+  }
+
+  // Format the Job Log entry — mirror the natural style users already
+  // write ("Tracking #: 1Z… — UPS — PO 32616-1"), extended to handle
+  // multiple tracking numbers cleanly.
+  const poLabel =
+    poRow.poNumber != null ? `${poRow.syncoreJobId}-${poRow.poNumber}` : poId;
+  const carriersSeen = new Set(
+    trackingEntries.map((t) => t.carrier).filter(Boolean),
+  );
+  const carrierText =
+    carriersSeen.size === 1
+      ? Array.from(carriersSeen)[0]
+      : carriersSeen.size > 1
+        ? "mixed"
+        : "carrier unknown";
+  const supplierTail = poRow.supplierName ? ` (${poRow.supplierName})` : "";
+
+  const header = `Tracking — ${carrierText} — PO ${poLabel}${supplierTail}`;
+  const body = trackingEntries
+    .map((t) => `  ${t.carrier}: ${t.trackingNumber}`)
+    .join("\n");
+  const description = `${header}\n${body}`;
+
+  try {
+    const ok = await addJobTrackerEntry({
+      jobId: poRow.syncoreJobId,
+      description,
+    });
+    if (!ok) {
+      return { ok: false, error: "Syncore returned Result=false" };
+    }
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof WebUiError) {
+      return { ok: false, error: err.message, status: err.status };
+    }
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
