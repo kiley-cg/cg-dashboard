@@ -28,6 +28,8 @@ import { SelectionProvider } from "./_components/SelectionProvider";
 import { BulkScheduleBar } from "./_components/BulkScheduleBar";
 import { FilterProvider } from "./_components/FilterProvider";
 import { FilterBar } from "./_components/FilterBar";
+import { ViewToggle } from "./_components/ViewToggle";
+import { WeekGridView } from "./_components/WeekGridView";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -41,6 +43,7 @@ interface PageProps {
     day?: string;
     week?: string;
     tab?: string;
+    view?: string;
   }>;
 }
 
@@ -71,6 +74,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   const today = pacificIsoDate();
   const params = await searchParams;
   const activeTab: TabKey = params.tab === "inbound" ? "inbound" : "schedule";
+  const view: "day" | "week" = params.view === "week" ? "week" : "day";
 
   // Week anchor (Monday). `?week=YYYY-MM-DD` overrides; default = this week.
   const weekStart = params.week
@@ -118,6 +122,70 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     countByDay[d] = items.length;
     qtyByDay[d] = items.reduce((sum, v) => sum + (v.po.totalQuantity ?? 0), 0);
   }
+
+  // Compact tiles for the optional Week-grid view. Same inboundReady /
+  // conflict logic as PoCard; precomputed server-side so the client
+  // grid component stays pure presentation + drag-and-drop wiring.
+  function buildTile(v: DecorationPoView) {
+    const dept = departmentForSupplier(v.po.supplierName);
+    const apparel = v.apparelSiblings;
+    const inboundReady =
+      apparel.length > 0 &&
+      apparel.every((s) => {
+        const open = s.status === "Open" || s.status === "Approved";
+        if (!open) return true;
+        const entries = v.trackingBySibling[s.poId] ?? [];
+        return (
+          entries.length > 0 &&
+          entries.every((t) =>
+            (t.status ?? "").toLowerCase().includes("delivered"),
+          )
+        );
+      });
+    let lastArrival: string | null = null;
+    for (const s of apparel) {
+      const open = s.status === "Open" || s.status === "Approved";
+      if (!open) continue;
+      const entries = v.trackingBySibling[s.poId] ?? [];
+      const allDelivered =
+        entries.length > 0 &&
+        entries.every((t) =>
+          (t.status ?? "").toLowerCase().includes("delivered"),
+        );
+      if (allDelivered) continue;
+      const etas = entries.map((t) => t.eta).filter((d): d is string => !!d);
+      const candidate =
+        etas.length > 0 ? etas.sort().slice(-1)[0] : s.inHandDate;
+      if (candidate && (!lastArrival || candidate > lastArrival)) {
+        lastArrival = candidate;
+      }
+    }
+    const isDone = v.state?.floorStatus === "done";
+    const dueDate = v.po.inHandDate ?? null;
+    const conflict =
+      !inboundReady &&
+      lastArrival != null &&
+      dueDate != null &&
+      lastArrival > dueDate;
+    return {
+      poId: v.po.poId,
+      jobId: v.po.syncoreJobId,
+      poNumber: v.po.poNumber,
+      customer: customerMap.get(v.po.syncoreJobId) ?? null,
+      department: dept,
+      qty: v.po.totalQuantity ?? null,
+      dueDate,
+      inboundReady,
+      conflict,
+      isDone,
+    };
+  }
+
+  const weekScheduledTiles: Record<string, ReturnType<typeof buildTile>[]> = {};
+  for (const d of days) {
+    weekScheduledTiles[d] = (scheduledByDay.get(d) ?? []).map(buildTile);
+  }
+  const weekUnscheduledTiles = unscheduled.map(buildTile);
 
   const dayItems = scheduledByDay.get(activeDay) ?? [];
   const unscheduledByDept = groupByDepartment(unscheduled);
@@ -184,18 +252,21 @@ export default async function ProductionPage({ searchParams }: PageProps) {
         <>
           <div className="px-8 pt-4 flex flex-wrap items-end gap-3">
             <WeekArrows
-              prevHref={`/production?week=${prevWeek}`}
-              nextHref={`/production?week=${nextWeek}`}
+              prevHref={`/production?week=${prevWeek}${view === "week" ? "&view=week" : ""}`}
+              nextHref={`/production?week=${nextWeek}${view === "week" ? "&view=week" : ""}`}
               weekStart={weekStart}
             />
-            <WeekTabs
-              days={days}
-              activeDay={activeDay}
-              weekStart={weekStart}
-              countByDay={countByDay}
-              qtyByDay={qtyByDay}
-              today={today}
-            />
+            <ViewToggle view={view} weekStart={weekStart} activeDay={activeDay} />
+            {view === "day" && (
+              <WeekTabs
+                days={days}
+                activeDay={activeDay}
+                weekStart={weekStart}
+                countByDay={countByDay}
+                qtyByDay={qtyByDay}
+                today={today}
+              />
+            )}
             <div className="ml-auto text-right">
               <span className="block text-[10px] tracking-[.1em] uppercase text-[#9A917F]">
                 Open decoration POs
@@ -212,7 +283,22 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             <FilterBar />
           </div>
 
-          {/* Scheduled section — current day's cards */}
+          {/* Week-grid view alternative — shown when ?view=week.
+              Skip the per-day cards section entirely; the grid handles
+              both scheduled + unscheduled with drag-and-drop. */}
+          {view === "week" && (
+            <div className="mx-8 mb-4">
+              <WeekGridView
+                days={weekDayOptions}
+                today={today}
+                scheduled={weekScheduledTiles}
+                unscheduled={weekUnscheduledTiles}
+              />
+            </div>
+          )}
+
+          {/* Scheduled section — current day's cards (hidden in week view) */}
+          {view === "day" && (
           <main className="mx-8 bg-white border border-[#E3DFD3] rounded-tr-card rounded-b-card p-4 flex flex-col gap-3">
             {dayItems.length === 0 ? (
               <div className="py-10 text-center text-[#9A917F] italic">
@@ -254,8 +340,11 @@ export default async function ProductionPage({ searchParams }: PageProps) {
 
             <HuddleSection activeDay={activeDay} />
           </main>
+          )}
 
-          {/* Unscheduled queue */}
+          {/* Unscheduled queue (hidden in week view — the grid has
+              its own unscheduled strip up top) */}
+          {view === "day" && (
           <section className="mx-8 mt-6 mb-8">
             <h2 className="text-[12px] tracking-[.14em] uppercase font-bold text-cg-teal mb-2">
               Unscheduled · {unscheduled.length} PO
@@ -299,6 +388,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
               </div>
             )}
           </section>
+          )}
         </>
       )}
 
