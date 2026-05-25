@@ -27,6 +27,14 @@ export async function fetchSSTracking(
   customerPoNumber: string,
   opts: SsTrackingOpts = {},
 ): Promise<OsnShipmentPackage[]> {
+  const { shipments } = await fetchSSTrackingRaw(customerPoNumber, opts);
+  return shipments;
+}
+
+export async function fetchSSTrackingRaw(
+  customerPoNumber: string,
+  opts: SsTrackingOpts = {},
+): Promise<{ shipments: OsnShipmentPackage[]; raw: unknown; url: string }> {
   const accountNumber = process.env.SS_WS_ID?.trim();
   const apiKey = process.env.SS_WS_PASSWORD?.trim();
   if (!accountNumber || !apiKey) {
@@ -52,8 +60,7 @@ export async function fetchSSTracking(
     throw new Error(`S&S ${path} ${res.status}: ${body.slice(0, 400)}`);
   }
   const data = (await res.json()) as unknown;
-
-  return extractShipments(data);
+  return { shipments: extractShipments(data), raw: data, url };
 }
 
 // S&S response shape (best guess from their docs):
