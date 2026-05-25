@@ -13,6 +13,7 @@
 //     http://localhost:3000/api/cron/poll-carriers?limit=50
 
 import { NextResponse } from "next/server";
+import { logCronRun } from "@/lib/cron/log";
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { fetchUpsTracking, UpsTrackingError } from "@/lib/ups/tracking";
@@ -164,5 +165,5 @@ async function handler(req: Request): Promise<NextResponse> {
   return NextResponse.json({ ok: true, summary, results });
 }
 
-export const POST = handler;
-export const GET = handler;
+export const POST = logCronRun("/api/cron/poll-carriers", handler);
+export const GET = logCronRun("/api/cron/poll-carriers", handler);
