@@ -22,6 +22,15 @@ const DOT_COLOR: Record<Status, string> = {
   done: "#1C2B27",
 };
 
+// When the PO has a schedule day picked, Pending becomes Scheduled —
+// give it a distinct amber dot so the visual transition is obvious
+// when Kristen drops it on a day. "stopped + scheduled" = Scheduled.
+const SCHEDULED_DOT = "#E0A800";
+function dotFor(status: Status, scheduled: boolean): string {
+  if (status === "stopped" && scheduled) return SCHEDULED_DOT;
+  return DOT_COLOR[status];
+}
+
 interface Props {
   poId: string;
   status: Status;
@@ -78,7 +87,7 @@ export function FloorStatusControl({
       <label className="inline-flex items-center gap-1.5">
         <span
           className="inline-block w-2.5 h-2.5 rounded-full"
-          style={{ background: DOT_COLOR[status] }}
+          style={{ background: dotFor(status, scheduled) }}
         />
         <span className="font-semibold">Status</span>
         <select
