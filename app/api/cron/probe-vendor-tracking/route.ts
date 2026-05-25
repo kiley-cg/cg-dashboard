@@ -59,17 +59,7 @@ const CB_OSN_CANDIDATES = [
 
 // S&S Activewear REST — path variants we'll try if the default 404s or
 // returns no shipments. ?poParam= overrides the query-param name too.
-const SS_TRACKING_PATH_CANDIDATES = [
-  // /invoices works but errors "Missing Input Value" on ?poNumber=...
-  // S&S's list endpoint is the documented filterable form.
-  { path: "/invoices/list", poParamName: "poNumber" },
-  { path: "/invoices/list", poParamName: "po" },
-  { path: "/invoices/list", poParamName: "customerPO" },
-  { path: "/invoices", poParamName: "poNumber" },
-  { path: "/shipments", poParamName: "poNumber" },
-  { path: "/shipments/list", poParamName: "poNumber" },
-  { path: "/orders", poParamName: "poNumber" },
-];
+// S&S has no scan list anymore — endpoint locked in (see ss/tracking.ts).
 
 function authorize(req: Request): boolean {
   const expected = process.env.CRON_SECRET;
@@ -149,41 +139,10 @@ export async function GET(req: Request) {
     });
   }
 
-  // S&S has no WSDL — it's REST. The "scan" for S&S is the path+param
-  // matrix instead. Run all combinations and report which yielded
-  // shipments.
-  if (scan && vendor === "ss") {
-    const startedAt = Date.now();
-    const results = await Promise.all(
-      SS_TRACKING_PATH_CANDIDATES.map(async ({ path, poParamName }) => {
-        try {
-          const shipments = await fetchSSTracking(poNumber, { path, poParamName });
-          return {
-            path,
-            poParamName,
-            outcome: "ok" as const,
-            shipmentCount: shipments.length,
-          };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return {
-            path,
-            poParamName,
-            outcome: "error" as const,
-            error: msg.slice(0, 400),
-          };
-        }
-      }),
-    );
-    return NextResponse.json({
-      ok: true,
-      mode: "scan",
-      vendor,
-      poNumber,
-      results,
-      durationMs: Date.now() - startedAt,
-    });
-  }
+  // S&S no longer needs a scan — endpoint + filter strategy is locked
+  // in per their API Developer Guide (pull all open orders with
+  // ?Boxes=true and match client-side by poNumber). Probe via the
+  // regular non-scan path with ?raw=1 to inspect the orders list.
 
   // Optional ?queryType= to test PO vs salesOrder. Default = po.
   const qt = url.searchParams.get("queryType");
