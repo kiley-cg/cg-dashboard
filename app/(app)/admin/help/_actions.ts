@@ -59,3 +59,13 @@ export async function deleteHelpDoc(formData: FormData): Promise<void> {
   await db.delete(schema.helpDocs).where(eq(schema.helpDocs.slug, slug));
   revalidatePath("/admin/help");
 }
+
+// One-click: insert default SOP content for every well-known slug
+// (production / inventory / dashboard / admin.*). Idempotent — skips
+// slugs that already have a row so admin edits aren't clobbered.
+export async function seedDefaultHelpDocs(): Promise<void> {
+  await requireAdmin();
+  const { seedHelpDocs } = await import("@/lib/db/seed-help");
+  await seedHelpDocs();
+  revalidatePath("/admin/help");
+}
