@@ -80,6 +80,61 @@ export async function schedulePo(formData: FormData): Promise<void> {
 }
 
 /**
+ * Bulk variant of schedulePo — assigns the same date to many POs in
+ * one transaction. Used by the BulkScheduleBar when the floor wants
+ * to drop a batch of POs onto the same day at once.
+ */
+export async function bulkSchedulePos(formData: FormData): Promise<void> {
+  await authorize();
+
+  const poIds = formData.getAll("poIds").filter((v): v is string => typeof v === "string");
+  const scheduledDate = formData.get("scheduledDate");
+  if (poIds.length === 0) throw new Error("No poIds provided");
+  if (typeof scheduledDate !== "string" || !ISO_DATE_RX.test(scheduledDate)) {
+    throw new Error("scheduledDate must be YYYY-MM-DD");
+  }
+
+  const now = new Date();
+  await db
+    .insert(schema.poScheduleState)
+    .values(poIds.map((poId) => ({ poId, scheduledDate })))
+    .onConflictDoUpdate({
+      target: schema.poScheduleState.poId,
+      set: {
+        scheduledDate: sql`excluded.scheduled_date`,
+        updatedAt: now,
+      },
+    });
+
+  revalidatePath("/production");
+}
+
+/**
+ * Bulk variant of unschedulePo — moves many POs back to the
+ * Unscheduled queue in one transaction.
+ */
+export async function bulkUnschedulePos(formData: FormData): Promise<void> {
+  await authorize();
+
+  const poIds = formData.getAll("poIds").filter((v): v is string => typeof v === "string");
+  if (poIds.length === 0) throw new Error("No poIds provided");
+
+  const now = new Date();
+  await db
+    .insert(schema.poScheduleState)
+    .values(poIds.map((poId) => ({ poId, scheduledDate: null })))
+    .onConflictDoUpdate({
+      target: schema.poScheduleState.poId,
+      set: {
+        scheduledDate: sql`NULL`,
+        updatedAt: now,
+      },
+    });
+
+  revalidatePath("/production");
+}
+
+/**
  * Remove the scheduled-day assignment so the PO returns to the
  * Unscheduled queue.
  */

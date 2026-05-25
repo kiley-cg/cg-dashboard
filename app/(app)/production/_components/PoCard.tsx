@@ -11,6 +11,7 @@ import { ScheduleControl } from "./ScheduleControl";
 import { FloorStatusControl } from "./FloorStatusControl";
 import { NotesEditor } from "./NotesEditor";
 import { InboundSiblingsPanel } from "./InboundSiblingsPanel";
+import { PoSelectCheckbox } from "./PoSelectCheckbox";
 
 const FLOOR_STATUSES = ["stopped", "in_progress", "done"] as const;
 type FloorStatus = (typeof FLOOR_STATUSES)[number];
@@ -102,6 +103,7 @@ export function PoCard({
         isDone ? "opacity-60" : "",
       ].join(" ")}
     >
+      <PoSelectCheckbox poId={po.poId} />
       <div className="flex-1 min-w-0">
         {/* Identity row */}
         <div className="flex items-center gap-2 flex-wrap">

@@ -24,6 +24,8 @@ import { HuddleSection } from "./_components/HuddleSection";
 import { NotificationToggle } from "./_components/NotificationToggle";
 import { WeekTabs } from "./_components/WeekTabs";
 import { InboundTab } from "./_components/InboundTab";
+import { SelectionProvider } from "./_components/SelectionProvider";
+import { BulkScheduleBar } from "./_components/BulkScheduleBar";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -129,7 +131,9 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   }));
 
   return (
+    <SelectionProvider>
     <div className="min-h-screen bg-[#F7F5EF] text-[#1C2B27]">
+      <BulkScheduleBar days={weekDayOptions} />
       <header className="flex flex-wrap items-end justify-between gap-3 px-8 pt-7 pb-4 border-b-2 border-[#1C2B27]">
         <div>
           <p className="text-[11px] tracking-[.14em] uppercase font-bold text-cg-teal">
@@ -297,6 +301,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
         </span>
       </footer>
     </div>
+    </SelectionProvider>
   );
 }
 
