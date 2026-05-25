@@ -43,6 +43,11 @@ export default async function AppLayout({
       email: session?.user?.email,
       userId: session?.user?.id,
       permission: "admin.roles",
+    })) ||
+    (await hasPermission({
+      email: session?.user?.email,
+      userId: session?.user?.id,
+      permission: "admin.crons",
     }));
 
   return (

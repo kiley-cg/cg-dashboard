@@ -15,6 +15,7 @@
 //     http://localhost:3000/api/cron/poll-vendor-tracking?limit=10
 
 import { NextResponse } from "next/server";
+import { logCronRun } from "@/lib/cron/log";
 import { and, desc, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { addTrackingIfMissing } from "@/lib/db/receiving";
@@ -203,5 +204,5 @@ async function handler(req: Request): Promise<NextResponse> {
 
 // Vercel cron uses POST internally (per the existing snapshot-followups
 // pattern). Support GET too for easier manual / curl invocation.
-export const POST = handler;
-export const GET = handler;
+export const POST = logCronRun("/api/cron/poll-vendor-tracking", handler);
+export const GET = logCronRun("/api/cron/poll-vendor-tracking", handler);

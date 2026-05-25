@@ -446,3 +446,30 @@ export const userRoles = pgTable(
     idxUser: index("rbac_user_role_user_idx").on(t.userId),
   }),
 );
+
+// --- Cron run history ----------------------------------------------------
+//
+// Each cron handler that's instrumented with logCronRun() appends one row
+// here per invocation. Powers the /admin/crons page: last-run timestamp,
+// success vs error, duration, and the summary the handler returned.
+
+export const cronRuns = pgTable(
+  "cron_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cronPath: text("cron_path").notNull(), // "/api/cron/poll-vendor-tracking"
+    triggeredAt: timestamp("triggered_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+    // "schedule" for Vercel-cron-driven runs; otherwise the userId
+    // (when run from the admin dashboard) or "external" for raw curl.
+    triggeredBy: text("triggered_by").notNull().default("schedule"),
+    durationMs: integer("duration_ms"),
+    status: text("status").notNull(), // "ok" | "error"
+    summary: jsonb("summary"),
+    errorMessage: text("error_message"),
+  },
+  (t) => ({
+    idxPath: index("cron_runs_path_idx").on(t.cronPath, t.triggeredAt),
+  }),
+);
