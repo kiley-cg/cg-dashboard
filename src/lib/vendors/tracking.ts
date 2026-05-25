@@ -8,6 +8,8 @@
 
 import type { OsnShipmentPackage } from "./promostandards/orderShipmentNotification";
 import { fetchSanMarTracking } from "./sanmar/tracking";
+import { fetchSSTracking } from "./ss/tracking";
+import { fetchCutterBuckTracking } from "./cb/tracking";
 import type { VendorCode } from "./types";
 
 export type { OsnShipmentPackage } from "./promostandards/orderShipmentNotification";
@@ -51,9 +53,10 @@ export async function fetchVendorTracking(args: {
     case "sanmar":
       return { vendor, shipments: await fetchSanMarTracking(args.poNumber) };
     case "ss":
+      return { vendor, shipments: await fetchSSTracking(args.poNumber) };
     case "cb":
+      return { vendor, shipments: await fetchCutterBuckTracking(args.poNumber) };
     case "unknown":
-      // Not yet wired — return empty so the cron can skip cleanly.
       return { vendor, shipments: [] };
   }
 }

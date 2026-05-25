@@ -120,7 +120,7 @@ async function handler(req: Request): Promise<NextResponse> {
         poNumber: vendorPoNumber,
       });
 
-      if (vendor === "unknown" || vendor === "ss" || vendor === "cb") {
+      if (vendor === "unknown") {
         return {
           poId: po.poId,
           jobId: po.jobId,
@@ -128,10 +128,7 @@ async function handler(req: Request): Promise<NextResponse> {
           supplier: po.supplier,
           vendor,
           outcome: "skipped",
-          reason:
-            vendor === "unknown"
-              ? `unrecognized supplier "${po.supplier}"`
-              : `${vendor} adapter not implemented yet`,
+          reason: `unrecognized supplier "${po.supplier}"`,
         };
       }
 
