@@ -26,6 +26,8 @@ import { WeekTabs } from "./_components/WeekTabs";
 import { InboundTab } from "./_components/InboundTab";
 import { SelectionProvider } from "./_components/SelectionProvider";
 import { BulkScheduleBar } from "./_components/BulkScheduleBar";
+import { FilterProvider } from "./_components/FilterProvider";
+import { FilterBar } from "./_components/FilterBar";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -137,6 +139,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
 
   return (
     <SelectionProvider>
+    <FilterProvider>
     <div className="min-h-screen bg-[#F7F5EF] text-[#1C2B27]">
       <BulkScheduleBar days={weekDayOptions} />
       <header className="flex flex-wrap items-end justify-between gap-3 px-8 pt-7 pb-4 border-b-2 border-[#1C2B27]">
@@ -201,6 +204,12 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                 {decorationPos.length}
               </strong>
             </div>
+          </div>
+
+          {/* Filter chips — instant client-side filter; applies to
+              both the scheduled day list and the Unscheduled queue. */}
+          <div className="px-8 pt-1 pb-3">
+            <FilterBar />
           </div>
 
           {/* Scheduled section — current day's cards */}
@@ -307,6 +316,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
         </span>
       </footer>
     </div>
+    </FilterProvider>
     </SelectionProvider>
   );
 }
