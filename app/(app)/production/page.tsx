@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { hasPermission, getUserPermissions } from "@/lib/rbac";
 import { PERMISSION_KEYS } from "@/lib/permissions";
 import {
+  getCsrMapByJobId,
   getCustomerDisplayMap,
   getMostRecentMirrorAt,
   listOpenDecorationPos,
@@ -111,9 +112,14 @@ export default async function ProductionPage({ searchParams }: PageProps) {
 
   const decorationPos = await listOpenDecorationPos();
   const mostRecent = await getMostRecentMirrorAt();
-  const customerMap = await getCustomerDisplayMap({
-    jobIds: Array.from(new Set(decorationPos.map((v) => v.po.syncoreJobId))),
-  });
+  const jobIds = Array.from(
+    new Set(decorationPos.map((v) => v.po.syncoreJobId)),
+  );
+  const customerMap = await getCustomerDisplayMap({ jobIds });
+  // CSR-per-job lookup powers the "Ask about this Job" composer's
+  // default recipient. Null when the job's never been on a follow-up
+  // snapshot (the floor picks from the dropdown manually then).
+  const csrMap = await getCsrMapByJobId({ jobIds });
 
   // Bucket by scheduled date. Null scheduled_date = unscheduled. POs
   // scheduled to a week other than the displayed one don't render here —
@@ -354,6 +360,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                       customer={
                         customerMap.get(v.po.syncoreJobId) ?? null
                       }
+                      csrName={csrMap.get(v.po.syncoreJobId) ?? null}
                       weekDays={weekDayOptions}
                     />
                   )),
@@ -402,6 +409,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                           customer={
                             customerMap.get(v.po.syncoreJobId) ?? null
                           }
+                          csrName={csrMap.get(v.po.syncoreJobId) ?? null}
                           weekDays={weekDayOptions}
                         />
                       ))}

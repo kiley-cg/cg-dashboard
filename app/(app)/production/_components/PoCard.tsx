@@ -18,6 +18,7 @@ import { FloorStatusControl } from "./FloorStatusControl";
 import { NotesEditor } from "./NotesEditor";
 import { InboundSiblingsPanel } from "./InboundSiblingsPanel";
 import { PoSelectCheckbox } from "./PoSelectCheckbox";
+import { AskAboutJobButton } from "./AskAboutJobButton";
 import { useFilter } from "./FilterProvider";
 
 const FLOOR_STATUSES = ["stopped", "in_progress", "done"] as const;
@@ -78,6 +79,10 @@ interface Props {
   trackingBySibling: Record<string, TrackingEntry[]>;
   department: Department;
   customer: string | null; // best-effort, may be null
+  // CSR-on-this-job name (from latest follow-up snapshot), null when
+  // unknown. Powers the "Ask about this Job" composer's default
+  // recipient — see AskAboutJobButton.
+  csrName: string | null;
   weekDays: DayOption[]; // Mon-Fri of the displayed week
 }
 
@@ -91,6 +96,7 @@ export function PoCard({
   department,
   weekDays,
   customer,
+  csrName,
 }: Props) {
   const chip = DEPT_CHIP[department];
   const display = customer ?? shipToBusinessName(po) ?? `Job ${po.syncoreJobId}`;
@@ -274,6 +280,7 @@ export function PoCard({
             scheduled={state?.scheduledDate != null}
             syncoreClosedAt={state?.syncoreClosedAt ?? null}
           />
+          <AskAboutJobButton jobId={po.syncoreJobId} csrName={csrName} />
         </div>
 
         <NotesEditor
