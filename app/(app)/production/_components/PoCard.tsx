@@ -109,6 +109,37 @@ export function PoCard({
       );
     });
 
+  // Conflict: latest apparel arrival is AFTER the decoration PO's
+  // in-hand date — i.e. the blanks won't be on the floor in time to
+  // physically meet the customer's needed-by. Same lastArrival logic
+  // as InboundSiblingsPanel: prefer tracking ETA, fall back to vendor
+  // in-hand. Only flag while we're still waiting on at least one PO
+  // (no point screaming about a date that's already past).
+  const lastArrival = (() => {
+    let max: string | null = null;
+    for (const s of apparelSiblings) {
+      const isOpen = s.status === "Open" || s.status === "Approved";
+      if (!isOpen) continue;
+      const entries = trackingBySibling[s.poId] ?? [];
+      const allDelivered =
+        entries.length > 0 &&
+        entries.every((t) =>
+          (t.status ?? "").toLowerCase().includes("delivered"),
+        );
+      if (allDelivered) continue;
+      const etas = entries.map((t) => t.eta).filter((d): d is string => !!d);
+      const candidate = etas.length > 0 ? etas.sort().slice(-1)[0] : s.inHandDate;
+      if (candidate && (!max || candidate > max)) max = candidate;
+    }
+    return max;
+  })();
+  const dueDate = po.inHandDate ?? null;
+  const conflict =
+    !inboundReady &&
+    lastArrival != null &&
+    dueDate != null &&
+    lastArrival > dueDate;
+
   // When all apparel is here, swap the tile's tint to a clear green so
   // the floor can scan a whole day's queue and spot what's actionable.
   // Don't override the department's left-border color — the department
@@ -117,14 +148,28 @@ export function PoCard({
   const READY_BORDER = "#3A8C5F";
   const bgColor = inboundReady && !isDone ? READY_TINT : chip.tint;
 
+  // Frame color precedence:
+  //   isDone   → dim (opacity 60%, neutral border)
+  //   conflict → red border + faint pink tint (overrides ready/neutral)
+  //   ready    → green border + green tint
+  //   default  → neutral 1px border, dept tint
+  const CONFLICT_BORDER = "#D64545";
+  const CONFLICT_TINT = "#FBEBEB";
+  const frame =
+    isDone
+      ? { borderColor: "#E3DFD3", borderWidth: 1, backgroundColor: chip.tint }
+      : conflict
+        ? { borderColor: CONFLICT_BORDER, borderWidth: 2, backgroundColor: CONFLICT_TINT }
+        : inboundReady
+          ? { borderColor: READY_BORDER, borderWidth: 2, backgroundColor: READY_TINT }
+          : { borderColor: "#E3DFD3", borderWidth: 1, backgroundColor: bgColor };
+
   return (
     <article
       style={{
         borderLeftColor: chip.color,
         borderLeftWidth: 6,
-        backgroundColor: bgColor,
-        borderColor: inboundReady && !isDone ? READY_BORDER : "#E3DFD3",
-        borderWidth: inboundReady && !isDone ? 2 : 1,
+        ...frame,
       }}
       className={[
         "flex gap-3.5 p-4 pl-[11px] rounded-card hover:-translate-y-px hover:shadow-md transition",
@@ -159,6 +204,14 @@ export function PoCard({
           {po.inHandDate && (
             <span>
               <b>Due</b> {po.inHandDate.slice(5)}
+            </span>
+          )}
+          {conflict && lastArrival && (
+            <span
+              className="text-[#A82424] font-semibold"
+              title={`Last apparel arrives ${lastArrival.slice(5)} — after the ${po.inHandDate?.slice(5)} due date`}
+            >
+              ⚠ apparel late ({lastArrival.slice(5)})
             </span>
           )}
           {department === "embroidery" && po.stitchCount != null && (
