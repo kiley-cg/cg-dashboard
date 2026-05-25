@@ -71,3 +71,35 @@ export async function inviteUser(formData: FormData): Promise<void> {
   await db.insert(users).values({ email, name, role }).onConflictDoNothing();
   revalidatePath("/admin/users");
 }
+
+// RBAC: assign one role to a user. Idempotent — ON CONFLICT DO NOTHING.
+export async function assignRoleToUser(formData: FormData): Promise<void> {
+  const session = await auth();
+  if (!isManager(session?.user?.email)) throw new Error("Not authorized");
+  const { userRoles } = await import("@/lib/db/schema");
+  const userId = formData.get("userId");
+  const roleId = formData.get("roleId");
+  if (typeof userId !== "string" || !userId) throw new Error("Missing userId");
+  if (typeof roleId !== "string" || !roleId) throw new Error("Missing roleId");
+  await db
+    .insert(userRoles)
+    .values({ userId, roleId, assignedByUserId: session?.user?.id ?? null })
+    .onConflictDoNothing();
+  revalidatePath("/admin/users");
+}
+
+// RBAC: remove a role from a user.
+export async function removeRoleFromUser(formData: FormData): Promise<void> {
+  const session = await auth();
+  if (!isManager(session?.user?.email)) throw new Error("Not authorized");
+  const { userRoles } = await import("@/lib/db/schema");
+  const { and } = await import("drizzle-orm");
+  const userId = formData.get("userId");
+  const roleId = formData.get("roleId");
+  if (typeof userId !== "string" || !userId) throw new Error("Missing userId");
+  if (typeof roleId !== "string" || !roleId) throw new Error("Missing roleId");
+  await db
+    .delete(userRoles)
+    .where(and(eq(userRoles.userId, userId), eq(userRoles.roleId, roleId)));
+  revalidatePath("/admin/users");
+}
