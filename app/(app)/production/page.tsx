@@ -33,6 +33,8 @@ import { FilterBar } from "./_components/FilterBar";
 import { ViewToggle } from "./_components/ViewToggle";
 import { WeekGridView } from "./_components/WeekGridView";
 import { UserPermissionsProvider } from "../_components/UserPermissionsProvider";
+import { HelpButton } from "../_components/HelpDrawer";
+import { getHelpDoc } from "@/lib/help";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -93,6 +95,8 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     permissions: PERMISSION_KEYS,
   });
   const userPermissions = Array.from(userPermSet);
+  const productionHelpDoc = await getHelpDoc("production");
+  const canEditHelp = userPermSet.has("admin.help");
 
   const today = pacificIsoDate();
   const params = await searchParams;
@@ -251,6 +255,12 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             Notes archive
           </Link>
           <NotificationToggle />
+          <HelpButton
+            slug="production"
+            title="Production planner"
+            doc={productionHelpDoc}
+            canEdit={canEditHelp}
+          />
         </div>
       </header>
 

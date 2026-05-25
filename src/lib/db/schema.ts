@@ -473,3 +473,22 @@ export const cronRuns = pgTable(
     idxPath: index("cron_runs_path_idx").on(t.cronPath, t.triggeredAt),
   }),
 );
+
+// --- Help / SOP docs -----------------------------------------------------
+//
+// One row per page-level SOP. Pages reference by slug; admins edit via
+// /admin/help. Markdown is stored as source so admins can tweak without
+// a deploy. Slug is the natural key: "production", "production.tracking",
+// "admin.crons", etc.
+
+export const helpDocs = pgTable(
+  "help_docs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull().unique(),
+    title: text("title").notNull(),
+    bodyMd: text("body_md").notNull().default(""),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id),
+  },
+);
