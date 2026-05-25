@@ -17,7 +17,7 @@ import {
   fetchSanMarTracking,
   fetchSanMarTrackingRaw,
 } from "@/lib/vendors/sanmar/tracking";
-import { fetchSSTracking } from "@/lib/vendors/ss/tracking";
+import { fetchSSTracking, fetchSSTrackingRaw } from "@/lib/vendors/ss/tracking";
 import {
   fetchCutterBuckTracking,
   fetchCutterBuckTrackingRaw,
@@ -212,7 +212,13 @@ export async function GET(req: Request) {
         }
         break;
       case "ss":
-        shipments = await fetchSSTracking(poNumber);
+        if (includeRaw) {
+          const result = await fetchSSTrackingRaw(poNumber);
+          shipments = result.shipments;
+          raw = { url: result.url, body: result.raw };
+        } else {
+          shipments = await fetchSSTracking(poNumber);
+        }
         break;
       case "cb":
         if (includeRaw) {
