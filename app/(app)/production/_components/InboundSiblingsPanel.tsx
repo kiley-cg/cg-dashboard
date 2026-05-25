@@ -35,20 +35,34 @@ export function InboundSiblingsPanel({
   const total = siblings.length;
   if (total === 0) return null;
 
-  const openSiblings = siblings.filter(
+  // A PO is "still arriving" if Syncore says Open/Approved AND we don't
+  // have evidence everything shipped to us has been delivered. The
+  // Syncore status alone isn't enough — the floor often receives apparel
+  // weeks before anyone manually posts the PO in Syncore. If we have
+  // tracking and every entry shows delivered, treat the PO as here.
+  const isFullyDelivered = (poId: string): boolean => {
+    const entries = trackingBySibling[poId] ?? [];
+    if (entries.length === 0) return false;
+    return entries.every((t) =>
+      (t.status ?? "").toLowerCase().includes("delivered"),
+    );
+  };
+
+  const syncoreOpen = siblings.filter(
     (s) => s.status === "Open" || s.status === "Approved",
   );
-  const open = openSiblings.length;
+  // Effective "still arriving" set: Syncore-open AND not fully delivered.
+  const stillArriving = syncoreOpen.filter((s) => !isFullyDelivered(s.poId));
+  const open = stillArriving.length;
   const allClosed = open === 0;
 
-  // "Last arrival" — when's the LAST package expected to land. For each
-  // open sibling PO, prefer its tracking ETA(s) if any are present;
-  // otherwise fall back to the vendor's promised in-hand date. Take the
-  // MAX across all open POs — Kristen can't schedule until everything
-  // is here, so the latest expected matters more than the earliest.
+  // "Last arrival" — when's the LAST package expected to land. Only
+  // consider POs still actually arriving; ignore ones already delivered.
+  // Prefer each PO's latest tracking ETA, fall back to the vendor's
+  // promised in-hand date for POs with no tracking yet.
   const lastArrival = (() => {
     let max: string | null = null;
-    for (const s of openSiblings) {
+    for (const s of stillArriving) {
       const etas = (trackingBySibling[s.poId] ?? [])
         .map((t) => t.eta)
         .filter((d): d is string => !!d);
