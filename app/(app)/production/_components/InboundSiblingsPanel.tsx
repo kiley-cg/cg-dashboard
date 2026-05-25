@@ -35,42 +35,28 @@ export function InboundSiblingsPanel({
   const total = siblings.length;
   if (total === 0) return null;
 
-  const open = siblings.filter(
+  const openSiblings = siblings.filter(
     (s) => s.status === "Open" || s.status === "Approved",
-  ).length;
-  const earliest = siblings
-    .map((s) => s.inHandDate)
-    .filter((d): d is string => !!d)
-    .sort()[0];
+  );
+  const open = openSiblings.length;
+  const allClosed = open === 0;
 
-  // "Ready by" = the latest known delivery date across every tracking
-  // entry on every open sibling PO. This is what matters for scheduling:
-  // we can't start decoration until the LAST package arrives, not when
-  // the FIRST one does. Falls back to in-hand date when no ETA is known.
-  const readyBy = (() => {
+  // "Last arrival" — when's the LAST package expected to land. For each
+  // open sibling PO, prefer its tracking ETA(s) if any are present;
+  // otherwise fall back to the vendor's promised in-hand date. Take the
+  // MAX across all open POs — Kristen can't schedule until everything
+  // is here, so the latest expected matters more than the earliest.
+  const lastArrival = (() => {
     let max: string | null = null;
-    for (const s of siblings) {
-      for (const t of trackingBySibling[s.poId] ?? []) {
-        const date = t.eta;
-        if (date && (!max || date > max)) max = date;
-      }
+    for (const s of openSiblings) {
+      const etas = (trackingBySibling[s.poId] ?? [])
+        .map((t) => t.eta)
+        .filter((d): d is string => !!d);
+      const candidate = etas.length > 0 ? etas.sort().slice(-1)[0] : s.inHandDate;
+      if (candidate && (!max || candidate > max)) max = candidate;
     }
     return max;
   })();
-
-  const allClosed = open === 0;
-  const trackingSuffix =
-    inboundTrackingCount > 0 ? ` · ${inboundTrackingCount} tracking` : "";
-  // Prefer ready-by (real ETA data) over earliest-in-hand (vendor's
-  // promised date) once we have any tracking ETAs. The latter stays
-  // visible when no ETA is known yet so the floor still has a date.
-  const dateSuffix = !allClosed
-    ? readyBy
-      ? ` · ready by ${readyBy.slice(5)}`
-      : earliest
-        ? ` · earliest in-hand ${earliest.slice(5)}`
-        : ""
-    : "";
 
   return (
     <div className="mt-2 text-[12px]">
@@ -85,11 +71,28 @@ export function InboundSiblingsPanel({
           className="inline-block w-2 h-2 rounded-full"
           style={{ background: allClosed ? "#3A8C5F" : "#E0A800" }}
         />
-        {allClosed
-          ? `Apparel all closed (${total} PO${total === 1 ? "" : "s"})`
-          : `${open}/${total} apparel PO${total === 1 ? "" : "s"} still open`}
-        {dateSuffix}
-        {trackingSuffix}
+        {allClosed ? (
+          `All ${total} apparel PO${total === 1 ? "" : "s"} delivered`
+        ) : (
+          <>
+            Waiting on {open} of {total} apparel PO{total === 1 ? "" : "s"}
+            {lastArrival && (
+              <>
+                {" · "}
+                <span className="font-normal text-[#5A5346]">last</span>{" "}
+                <span>{lastArrival.slice(5)}</span>
+              </>
+            )}
+            {inboundTrackingCount > 0 && (
+              <>
+                {" · "}
+                <span className="font-normal text-[#5A5346]">
+                  {inboundTrackingCount} tracking
+                </span>
+              </>
+            )}
+          </>
+        )}
         <span className="text-[10px] text-[#9B9588] ml-1" aria-hidden>
           {expanded ? "▴" : "▾"}
         </span>
