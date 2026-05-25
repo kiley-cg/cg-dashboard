@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { eq, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
-import { hasRoleAccess } from "@/lib/roles";
+import { hasPermission } from "@/lib/rbac";
 import { SyncoreError } from "@/lib/syncore/client";
 import { WebUiError, addJobTrackerEntry } from "@/lib/syncore/webui";
 import { pushPoTrackingToJobLog } from "@/lib/syncore/job-tracker-push";
@@ -37,10 +37,10 @@ async function authorize(): Promise<{
   userName: string | null;
 }> {
   const session = await auth();
-  const allowed = await hasRoleAccess({
+  const allowed = await hasPermission({
     email: session?.user?.email,
     userId: session?.user?.id,
-    required: "production",
+    permission: "production.view",
   });
   if (!allowed) throw new Error("Not authorized");
   return {

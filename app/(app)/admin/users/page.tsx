@@ -5,13 +5,11 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { users, roles as rbacRoles, userRoles as rbacUserRoles } from "@/lib/db/schema";
 import { isManager } from "@/lib/managers";
-import { APP_ROLES, APP_ROLE_LABELS } from "@/lib/roles";
 import { hasPermission } from "@/lib/rbac";
 import {
   assignRoleToUser,
   inviteUser,
   removeRoleFromUser,
-  setUserRole,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +36,6 @@ export default async function AdminUsersPage() {
       id: users.id,
       name: users.name,
       email: users.email,
-      role: users.role,
     })
     .from(users)
     .orderBy(asc(users.email));
@@ -94,7 +91,7 @@ export default async function AdminUsersPage() {
         </p>
         <form
           action={inviteUser}
-          className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_10rem_auto] gap-2"
+          className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2"
         >
           <input
             type="text"
@@ -109,18 +106,6 @@ export default async function AdminUsersPage() {
             placeholder="email@colorgraphicswa.com"
             className="border border-cg-n-300 rounded-input px-2 py-1 bg-white text-sm"
           />
-          <select
-            name="role"
-            defaultValue=""
-            className="border border-cg-n-300 rounded-input px-2 py-1 bg-white text-sm"
-          >
-            <option value="">— no role —</option>
-            {APP_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {APP_ROLE_LABELS[r]}
-              </option>
-            ))}
-          </select>
           <button
             type="submit"
             className="rounded-btn bg-cg-black text-white px-3 py-1 text-xs font-semibold hover:bg-cg-n-800 transition"
@@ -128,6 +113,9 @@ export default async function AdminUsersPage() {
             Invite
           </button>
         </form>
+        <p className="text-[11px] text-cg-n-500 mt-2">
+          After invite, assign one or more RBAC roles in the table below.
+        </p>
       </div>
 
       <div className="border border-cg-n-200 rounded-card overflow-hidden">
@@ -136,10 +124,9 @@ export default async function AdminUsersPage() {
             <tr className="text-left">
               <th className="px-4 py-2 font-semibold">User</th>
               <th className="px-4 py-2 font-semibold">Email</th>
-              <th className="px-4 py-2 font-semibold w-48">Legacy role</th>
               <th className="px-4 py-2 font-semibold">
                 <div className="flex items-center gap-2">
-                  RBAC roles
+                  Roles
                   <Link
                     href="/admin/roles"
                     className="text-[10px] text-cg-teal hover:underline normal-case font-normal"
@@ -154,7 +141,7 @@ export default async function AdminUsersPage() {
             {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={3}
                   className="px-4 py-8 text-center text-cg-n-500 italic"
                 >
                   No users yet. They appear here after first sign-in.
@@ -176,29 +163,6 @@ export default async function AdminUsersPage() {
                         Manager
                       </span>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <form action={setUserRole} className="flex gap-2">
-                      <input type="hidden" name="userId" value={u.id} />
-                      <select
-                        name="role"
-                        defaultValue={u.role ?? ""}
-                        className="border border-cg-n-300 rounded-input px-2 py-1 bg-white text-sm flex-1"
-                      >
-                        <option value="">— none —</option>
-                        {APP_ROLES.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="submit"
-                        className="rounded-btn bg-cg-black text-white px-3 py-1 text-xs font-semibold hover:bg-cg-n-800 transition"
-                      >
-                        Save
-                      </button>
-                    </form>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">

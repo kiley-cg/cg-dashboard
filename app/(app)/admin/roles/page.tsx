@@ -4,7 +4,12 @@ import { asc, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
 import { hasPermission } from "@/lib/rbac";
-import { createRole, deleteRole, reseedRoles } from "./_actions";
+import {
+  createRole,
+  deleteRole,
+  migrateLegacyRoles,
+  reseedRoles,
+} from "./_actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Roles · Admin · Color Graphics" };
@@ -64,15 +69,26 @@ export default async function AdminRolesPage() {
             page.
           </p>
         </div>
-        <form action={reseedRoles}>
-          <button
-            type="submit"
-            className="text-xs border border-cg-n-300 rounded-input px-3 py-1.5 hover:bg-cg-n-100"
-            title="Add any missing default roles (admin/manager/csr/floor/viewer). Won't overwrite custom edits."
-          >
-            Re-seed defaults
-          </button>
-        </form>
+        <div className="flex items-center gap-2">
+          <form action={reseedRoles}>
+            <button
+              type="submit"
+              className="text-xs border border-cg-n-300 rounded-input px-3 py-1.5 hover:bg-cg-n-100"
+              title="Add any missing default roles (admin/manager/csr/floor/viewer). Won't overwrite custom edits."
+            >
+              Re-seed defaults
+            </button>
+          </form>
+          <form action={migrateLegacyRoles}>
+            <button
+              type="submit"
+              className="text-xs border border-cg-n-300 rounded-input px-3 py-1.5 hover:bg-cg-n-100"
+              title="Map every user's legacy role text column to the matching RBAC role. Idempotent."
+            >
+              Migrate legacy roles
+            </button>
+          </form>
+        </div>
       </header>
 
       <div className="border border-cg-n-200 rounded-card divide-y divide-cg-n-200">

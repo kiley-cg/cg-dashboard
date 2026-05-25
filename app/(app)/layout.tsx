@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
-import { isManager } from "@/lib/managers";
-import { hasRoleAccess } from "@/lib/roles";
 import { hasPermission } from "@/lib/rbac";
 
 export default async function AppLayout({
@@ -12,21 +10,13 @@ export default async function AppLayout({
 }) {
   const session = await auth();
   // Permission-driven nav visibility. Each link asks "can this user
-  // see the dashboard?" rather than "what's their role?". Manager
-  // emails still pass automatically (superset). Production keeps a
-  // legacy hasRoleAccess fallback during the transition so existing
-  // users don't lose access mid-rollout.
-  const showProduction =
-    (await hasPermission({
-      email: session?.user?.email,
-      userId: session?.user?.id,
-      permission: "production.view",
-    })) ||
-    (await hasRoleAccess({
-      email: session?.user?.email,
-      userId: session?.user?.id,
-      required: "production",
-    }));
+  // see the dashboard?". Manager emails still pass automatically
+  // (superset built into hasPermission).
+  const showProduction = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "production.view",
+  });
   const showDashboard = await hasPermission({
     email: session?.user?.email,
     userId: session?.user?.id,
