@@ -110,7 +110,12 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   }
 
   const countByDay: Record<string, number> = {};
-  for (const d of days) countByDay[d] = scheduledByDay.get(d)?.length ?? 0;
+  const qtyByDay: Record<string, number> = {};
+  for (const d of days) {
+    const items = scheduledByDay.get(d) ?? [];
+    countByDay[d] = items.length;
+    qtyByDay[d] = items.reduce((sum, v) => sum + (v.po.totalQuantity ?? 0), 0);
+  }
 
   const dayItems = scheduledByDay.get(activeDay) ?? [];
   const unscheduledByDept = groupByDepartment(unscheduled);
@@ -185,6 +190,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
               activeDay={activeDay}
               weekStart={weekStart}
               countByDay={countByDay}
+              qtyByDay={qtyByDay}
               today={today}
             />
             <div className="ml-auto text-right">
