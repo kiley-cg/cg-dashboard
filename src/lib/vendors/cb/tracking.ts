@@ -16,8 +16,12 @@ import {
   type OsnShipmentPackage,
 } from "../promostandards/orderShipmentNotification";
 
+// Confirmed via C&B PromoStandards Integration Guide (uploaded by Kiley).
+// Endpoint is OrderShipmentNotification.asmx — NO "Service" suffix,
+// unlike their other PromoStandards endpoints (InventoryService121,
+// ProductData200, etc).
 const DEFAULT_WSDL_URL =
-  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService100.asmx?wsdl";
+  "https://api.cbcorporate.com/promostandards/OrderShipmentNotification.asmx?wsdl";
 
 function env(name: string): string | null {
   const v = process.env[name];

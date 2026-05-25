@@ -50,12 +50,11 @@ const SANMAR_OSN_CANDIDATES = [
 // Cutter & Buck runs IIS/.NET (.asmx paths). Their Inventory binding is
 // InventoryService121.asmx (PromoStandards 1.2.1). OSN versions we'll try.
 const CB_OSN_CANDIDATES = [
+  // Confirmed canonical endpoint per C&B PromoStandards Integration Guide.
+  "https://api.cbcorporate.com/promostandards/OrderShipmentNotification.asmx?wsdl",
+  // Legacy guesses kept for posterity / regression detection.
   "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService100.asmx?wsdl",
-  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService110.asmx?wsdl",
-  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService120.asmx?wsdl",
-  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService121.asmx?wsdl",
-  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService200.asmx?wsdl",
-  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService.asmx?wsdl",
+  "https://api.cbcorporate.com/promostandards/OrderShipmentNotification100.asmx?wsdl",
 ];
 
 // S&S Activewear REST — path variants we'll try if the default 404s or
