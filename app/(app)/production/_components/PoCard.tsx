@@ -167,6 +167,7 @@ export function PoCard({
           <FloorStatusControl
             poId={po.poId}
             status={floorStatus}
+            scheduled={state?.scheduledDate != null}
             syncoreClosedAt={state?.syncoreClosedAt ?? null}
           />
         </div>

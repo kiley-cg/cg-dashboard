@@ -6,11 +6,15 @@ import { closeSyncorePo, setFloorStatus } from "../_actions";
 const STATUSES = ["stopped", "in_progress", "done"] as const;
 type Status = (typeof STATUSES)[number];
 
-const LABELS: Record<Status, string> = {
-  stopped: "Stopped",
-  in_progress: "In progress",
-  done: "Done",
-};
+// "stopped" is the un-started state. Display label depends on whether a
+// schedule day has been picked — that's how we get four user-visible
+// statuses (Pending / Scheduled / In Progress / Completed) out of three
+// underlying enum values. Keeps the existing data model untouched.
+function labelFor(status: Status, scheduled: boolean): string {
+  if (status === "in_progress") return "In Progress";
+  if (status === "done") return "Completed";
+  return scheduled ? "Scheduled" : "Pending";
+}
 
 const DOT_COLOR: Record<Status, string> = {
   stopped: "#D64545",
@@ -21,10 +25,16 @@ const DOT_COLOR: Record<Status, string> = {
 interface Props {
   poId: string;
   status: Status;
+  scheduled: boolean;
   syncoreClosedAt: Date | string | null;
 }
 
-export function FloorStatusControl({ poId, status, syncoreClosedAt }: Props) {
+export function FloorStatusControl({
+  poId,
+  status,
+  scheduled,
+  syncoreClosedAt,
+}: Props) {
   const [pending, startTransition] = useTransition();
   const [closing, startClosing] = useTransition();
 
@@ -82,7 +92,7 @@ export function FloorStatusControl({ poId, status, syncoreClosedAt }: Props) {
         >
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {LABELS[s]}
+              {labelFor(s, scheduled)}
             </option>
           ))}
         </select>
