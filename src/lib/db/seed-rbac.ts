@@ -28,9 +28,12 @@ const SEED_ROLES: SeedRole[] = [
   {
     name: "manager",
     label: "Manager",
-    description: "Every dashboard + write actions; no admin pages.",
+    description: "Every dashboard + write actions + manage help docs; no other admin pages.",
     isSystem: true,
-    permissions: PERMISSION_KEYS.filter((k) => !k.startsWith("admin.")),
+    permissions: [
+      ...PERMISSION_KEYS.filter((k) => !k.startsWith("admin.")),
+      "admin.help" as const,
+    ],
   },
   {
     name: "csr",

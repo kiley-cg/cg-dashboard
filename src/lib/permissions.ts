@@ -73,6 +73,10 @@ export const PERMISSIONS = {
     label: "Manage crons",
     description: "View cron schedule + run history, trigger manual runs.",
   },
+  "admin.help": {
+    label: "Edit help docs",
+    description: "Create + edit the SOP / help content shown in each dashboard's help drawer.",
+  },
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;

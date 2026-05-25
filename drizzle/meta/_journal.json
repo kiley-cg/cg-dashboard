@@ -71,6 +71,13 @@
       "when": 1779687377393,
       "tag": "0009_confused_alex_wilder",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779687631714,
+      "tag": "0010_clumsy_zeigeist",
+      "breakpoints": true
     }
   ]
 }
