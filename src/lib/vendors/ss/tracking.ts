@@ -19,7 +19,8 @@ interface SsTrackingOpts {
   // Override which query-parameter name carries the PO number, since
   // S&S's docs are slightly ambiguous. Default = "poNumber".
   poParamName?: string;
-  // Override path. Default = "/orders".
+  // Override path. Default = "/invoices" (where S&S keeps tracking #s;
+  // /orders has metadata only and doesn't even honor the poNumber filter).
   path?: string;
 }
 
@@ -43,7 +44,7 @@ export async function fetchSSTrackingRaw(
     );
   }
   const base = (opts.apiBase ?? process.env.SS_API_BASE_URL?.trim() ?? DEFAULT_API_BASE).replace(/\/+$/, "");
-  const path = opts.path ?? "/orders";
+  const path = opts.path ?? "/invoices";
   const param = opts.poParamName ?? "poNumber";
 
   const authHeader =

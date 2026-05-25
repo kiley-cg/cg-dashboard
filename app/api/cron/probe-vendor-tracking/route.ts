@@ -60,10 +60,11 @@ const CB_OSN_CANDIDATES = [
 // S&S Activewear REST — path variants we'll try if the default 404s or
 // returns no shipments. ?poParam= overrides the query-param name too.
 const SS_TRACKING_PATH_CANDIDATES = [
+  { path: "/invoices", poParamName: "poNumber" },
+  { path: "/invoices", poParamName: "po" },
+  { path: "/invoices", poParamName: "customerPO" },
+  { path: "/invoices/", poParamName: "poNumber" },
   { path: "/orders", poParamName: "poNumber" },
-  { path: "/orders", poParamName: "po" },
-  { path: "/orders", poParamName: "customerPO" },
-  { path: "/orders/", poParamName: "poNumber" },
 ];
 
 function authorize(req: Request): boolean {
