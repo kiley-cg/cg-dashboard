@@ -5,6 +5,7 @@ import { desc, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
 import { hasPermission } from "@/lib/rbac";
+import { PageHelp } from "../../_components/PageHelp";
 import { runCronNow } from "./_actions";
 
 export const dynamic = "force-dynamic";
@@ -61,16 +62,19 @@ export default async function AdminCronsPage() {
 
   return (
     <section className="max-w-4xl mx-auto px-6 py-10 space-y-6">
-      <header>
-        <p className="text-cg-red text-xs font-semibold uppercase tracking-wider">
-          Admin
-        </p>
-        <h1 className="text-2xl font-extrabold tracking-tight mt-1">
-          Scheduled jobs
-        </h1>
-        <p className="text-cg-n-600 mt-2 text-sm">
-          Source: <code className="bg-cg-n-100 px-1 rounded text-xs">vercel.json</code>. Run history is captured for instrumented routes; uninstrumented routes show <em>no history yet</em>.
-        </p>
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-cg-red text-xs font-semibold uppercase tracking-wider">
+            Admin
+          </p>
+          <h1 className="text-2xl font-extrabold tracking-tight mt-1">
+            Scheduled jobs
+          </h1>
+          <p className="text-cg-n-600 mt-2 text-sm">
+            Source: <code className="bg-cg-n-100 px-1 rounded text-xs">vercel.json</code>. Run history is captured for instrumented routes; uninstrumented routes show <em>no history yet</em>.
+          </p>
+        </div>
+        <PageHelp slug="admin.crons" title="Admin · Crons" />
       </header>
 
       <div className="space-y-4">
