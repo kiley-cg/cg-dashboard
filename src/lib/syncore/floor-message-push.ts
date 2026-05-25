@@ -1,28 +1,33 @@
-// "Ask about this Job" floor → CSR/Sales messaging helper. Sibling to
-// pushPoTrackingToJobLog: same Syncore Job Log primitive
-// (addJobTrackerEntry), different formatter.
+// "Ask about this Job" floor → CSR/Sales messaging helper.
 //
-// v1 used a "[Floor → X] [from Y]" prefix to express routing, since
-// the addJobTrackerEntry endpoint is silent (no native notification).
-// Kiley flagged the arrow mangling and pointed at SendTrackerAsync
-// (Syncore's real tracker-with-email endpoint) — wiring that needs a
-// HAR capture to lock down the request shape. Until then, drop the
-// prefix entirely so the Job Log shows just the message body. Author
-// attribution falls back to Syncore's own "createdBy" column on the
-// log row.
+// Two write paths:
+//   - sendJobTrackerEntry (preferred) — posts the entry AND emails the
+//     recipient. Used when we have the recipient's Syncore user ID.
+//   - addJobTrackerEntry (fallback) — silent log-only. Used when the
+//     recipient's user ID isn't in the people registry yet (the email
+//     part will need to be added when we capture another HAR).
+//
+// Body is the plain message — Syncore tags it with the sender (the
+// authenticated webui user) in its own createdBy column.
 
-import { addJobTrackerEntry, WebUiError } from "./webui";
+import {
+  addJobTrackerEntry,
+  sendJobTrackerEntry,
+  WebUiError,
+} from "./webui";
 
 export type PushResult =
-  | { ok: true }
+  | { ok: true; emailed: boolean }
   | { ok: false; error: string; status?: number };
 
 export interface FloorMessagePushArgs {
   jobId: string;
-  // Kept on the signature so the next iteration (SendTrackerAsync) can
-  // use them without changing call sites; currently unused while we're
-  // on the silent endpoint.
+  // Display name only — used for client confirmation copy. The actual
+  // routing happens via recipientSyncoreUserId.
   recipientDisplayName: string;
+  // Syncore user ID for the email-firing endpoint. When null/undefined,
+  // we fall back to the silent log entry (no email).
+  recipientSyncoreUserId: number | null | undefined;
   fromDisplayName: string;
   body: string;
 }
@@ -35,12 +40,22 @@ export async function pushFloorMessageToJobLog(
   if (!body) return { ok: false, error: "Message body is empty" };
 
   try {
+    if (args.recipientSyncoreUserId) {
+      const ok = await sendJobTrackerEntry({
+        jobId: args.jobId,
+        recipientUserIds: [args.recipientSyncoreUserId],
+        notes: body,
+      });
+      if (!ok) return { ok: false, error: "Syncore returned Result=false" };
+      return { ok: true, emailed: true };
+    }
+    // Fallback for recipients whose Syncore user ID we don't have yet.
     const ok = await addJobTrackerEntry({
       jobId: args.jobId,
       description: body,
     });
     if (!ok) return { ok: false, error: "Syncore returned Result=false" };
-    return { ok: true };
+    return { ok: true, emailed: false };
   } catch (err) {
     if (err instanceof WebUiError) {
       return { ok: false, error: err.message, status: err.status };

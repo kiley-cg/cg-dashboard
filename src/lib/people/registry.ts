@@ -14,19 +14,30 @@ export interface Person {
   // Display name in the recipient dropdown + Job Log attribution.
   displayName: string;
   role: PersonRole;
-  // Optional Syncore-side identifier — wire this in if a future Job Log
-  // notification API needs an explicit user reference.
+  // Syncore user ID for /Job/SendTrackerAsync. When present, sends route
+  // through Syncore's notify-and-email flow. When absent, falls back to
+  // a silent Job Log entry. Sourced from a real Job Tracker payload HAR.
+  // To add a missing ID: have the person sign in to ateasesystems.net,
+  // open any job's tracker, send a message — the Network panel shows
+  // their userId as createdById in the readback.
+  syncoreUserId?: number;
+  // Optional Syncore-side display name as it appears in the
+  // customerServiceRepName column on jobs — used to fuzzy-match the
+  // default recipient.
   syncoreCustomerServiceRepName?: string;
 }
 
 export const ROUTABLE_PEOPLE: Person[] = [
-  { key: "valerie", displayName: "Valerie Ross", role: "csr", syncoreCustomerServiceRepName: "Valerie Ross" },
+  { key: "valerie", displayName: "Valerie Ross", role: "csr", syncoreUserId: 13379, syncoreCustomerServiceRepName: "Valerie Ross" },
+  // Jeremiah's userId not yet known — sends will fall back to silent
+  // Job Log entry (no email). Fill in when we have a HAR with him.
   { key: "jeremiah", displayName: "Jeremiah Gana", role: "csr", syncoreCustomerServiceRepName: "Jeremiah Gana" },
-  { key: "heidi", displayName: "Heidi", role: "sales" },
+  { key: "heidi", displayName: "Heidi Lopez-Mix", role: "sales", syncoreUserId: 4916 },
+  // Tricia + Voshte userIds not yet known.
   { key: "tricia", displayName: "Tricia", role: "sales" },
   { key: "voshte", displayName: "Voshte", role: "sales" },
-  { key: "kiley", displayName: "Kiley", role: "sales" },
-  { key: "jennie", displayName: "Jennie", role: "sales_assistant" },
+  { key: "kiley", displayName: "Kiley Gustafson", role: "sales", syncoreUserId: 4915 },
+  { key: "jennie", displayName: "Jennie Guthrie-Lopez", role: "sales_assistant", syncoreUserId: 5848 },
 ];
 
 export const PEOPLE_BY_KEY: Record<string, Person> = Object.fromEntries(

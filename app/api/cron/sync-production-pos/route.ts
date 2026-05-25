@@ -276,10 +276,7 @@ async function handleSafe(req: Request) {
   }
 }
 
-export async function GET(req: Request) {
-  return handleSafe(req);
-}
+import { logCronRun } from "@/lib/cron/log";
 
-export async function POST(req: Request) {
-  return handleSafe(req);
-}
+export const GET = logCronRun("/api/cron/sync-production-pos", handleSafe);
+export const POST = logCronRun("/api/cron/sync-production-pos", handleSafe);
