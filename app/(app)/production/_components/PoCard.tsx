@@ -1,5 +1,11 @@
+"use client";
+
 // One card per decoration PO (v2 model). Replaces the v1 JobCard which
 // rolled multiple POs from the same job into one card.
+//
+// "use client" because the card participates in client-only filter
+// state (FilterProvider). All data still comes from the server via
+// props — no client-side fetches.
 
 import type {
   MirroredPo,
@@ -12,6 +18,7 @@ import { FloorStatusControl } from "./FloorStatusControl";
 import { NotesEditor } from "./NotesEditor";
 import { InboundSiblingsPanel } from "./InboundSiblingsPanel";
 import { PoSelectCheckbox } from "./PoSelectCheckbox";
+import { useFilter } from "./FilterProvider";
 
 const FLOOR_STATUSES = ["stopped", "in_progress", "done"] as const;
 type FloorStatus = (typeof FLOOR_STATUSES)[number];
@@ -90,6 +97,7 @@ export function PoCard({
   const instructions = csrInstructionsSnippet(po);
   const floorStatus = asFloorStatus(state?.floorStatus);
   const isDone = floorStatus === "done";
+  const filter = useFilter();
 
   // "Inbound ready" — every apparel sibling PO is either Syncore-closed
   // OR has all tracking entries marked delivered. Mirrors the logic in
@@ -139,6 +147,19 @@ export function PoCard({
     lastArrival != null &&
     dueDate != null &&
     lastArrival > dueDate;
+
+  // Client-side filter — render nothing when this card doesn't match.
+  // Keep ALL hooks above this early-return (React rules-of-hooks).
+  if (
+    !filter.matches({
+      dept: department,
+      inboundReady,
+      customer,
+      jobId: po.syncoreJobId,
+    })
+  ) {
+    return null;
+  }
 
   // When all apparel is here, swap the tile's tint to a clear green so
   // the floor can scan a whole day's queue and spot what's actionable.
