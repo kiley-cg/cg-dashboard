@@ -1,11 +1,16 @@
 "use client";
 
 import { useSelection } from "./SelectionProvider";
+import { useCan } from "../../_components/UserPermissionsProvider";
 
 // Per-card checkbox. Reads / writes the shared SelectionProvider so
-// the BulkScheduleBar can act on all selected POs at once.
+// the BulkScheduleBar can act on all selected POs at once. Hidden
+// from users who can't bulk-schedule — selecting would be a no-op
+// since the bar wouldn't appear.
 export function PoSelectCheckbox({ poId }: { poId: string }) {
   const { isSelected, toggle } = useSelection();
+  const canBulkSchedule = useCan("production.bulk_schedule");
+  if (!canBulkSchedule) return null;
   const checked = isSelected(poId);
   return (
     <label

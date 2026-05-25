@@ -2,8 +2,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { asc, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
-import { isManager } from "@/lib/managers";
 import { db, schema } from "@/lib/db/client";
+import { hasPermission } from "@/lib/rbac";
 import { createRole, deleteRole, reseedRoles } from "./_actions";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,12 @@ export const metadata = { title: "Roles · Admin · Color Graphics" };
 
 export default async function AdminRolesPage() {
   const session = await auth();
-  if (!isManager(session?.user?.email)) notFound();
+  const allowed = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "admin.roles",
+  });
+  if (!allowed) notFound();
 
   // Roles + counts (members + permission grants) for the list.
   const roleRows = await db

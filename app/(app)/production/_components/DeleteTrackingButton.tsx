@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { deleteTrackingAction } from "../_actions";
+import { useCan } from "../../_components/UserPermissionsProvider";
 
 export function DeleteTrackingButton({
   trackingId,
@@ -9,6 +10,8 @@ export function DeleteTrackingButton({
   trackingId: string;
 }) {
   const [pending, start] = useTransition();
+  const canDelete = useCan("production.delete_tracking");
+  if (!canDelete) return null;
 
   function onClick() {
     const fd = new FormData();
