@@ -284,6 +284,44 @@ export async function getCustomerDisplayMap(opts: {
 }
 
 /**
+ * Per-job CSR-on-record lookup from the latest follow-up snapshot.
+ * Phase B "Ask about this Job" feature uses this to default the
+ * composer's recipient to the job's CSR. Returns null when the job has
+ * never been on a follow-up snapshot.
+ */
+export async function getCsrMapByJobId(opts: {
+  jobIds: string[];
+}): Promise<Map<string, string>> {
+  if (opts.jobIds.length === 0) return new Map();
+  const numericIds = opts.jobIds
+    .map((id) => Number(id))
+    .filter((n) => Number.isFinite(n));
+  if (numericIds.length === 0) return new Map();
+  const rows = await db.execute<{
+    job_id: number | string;
+    csr_name: string | null;
+  }>(sql`
+    SELECT DISTINCT ON (job_id)
+      job_id,
+      csr_name
+    FROM followup_rows
+    WHERE job_id IN (${sql.join(
+      numericIds.map((n) => sql`${n}`),
+      sql`, `,
+    )})
+    ORDER BY job_id, snapshot_at DESC
+  `);
+  const map = new Map<string, string>();
+  for (const r of Array.from(
+    rows as Iterable<{ job_id: number | string; csr_name: string | null }>,
+  )) {
+    const csr = r.csr_name?.trim();
+    if (csr) map.set(String(r.job_id), csr);
+  }
+  return map;
+}
+
+/**
  * Last successful mirror time across all POs, for the page's "last
  * updated" header. Null if the table is empty.
  */

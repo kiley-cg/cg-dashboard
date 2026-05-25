@@ -456,3 +456,50 @@ export async function pushTrackingToJobLogAction(
   }
   return await pushPoTrackingToJobLog(poId);
 }
+
+/**
+ * Phase B "Ask about this Job" — Kristen fires a message into a Job's
+ * Syncore Job Log, addressed to a CSR or salesperson. Reuses the same
+ * Job Log primitive (addJobTrackerEntry) as pushPoTrackingToJobLog.
+ *
+ * Idempotency: the client disables the Send button during the
+ * transition; we additionally validate inputs here so a malformed
+ * submit can't post a half-formed entry.
+ */
+export async function askAboutJobAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { userName } = await authorize();
+
+  const jobId = formData.get("jobId");
+  const recipientKey = formData.get("recipient");
+  const body = formData.get("body");
+  if (typeof jobId !== "string" || !jobId) {
+    return { ok: false, error: "Missing jobId" };
+  }
+  if (typeof recipientKey !== "string" || !recipientKey) {
+    return { ok: false, error: "Pick a recipient" };
+  }
+  const { PEOPLE_BY_KEY } = await import("@/lib/people/registry");
+  const recipient = PEOPLE_BY_KEY[recipientKey];
+  if (!recipient) {
+    return { ok: false, error: `Unknown recipient: ${recipientKey}` };
+  }
+  if (typeof body !== "string" || !body.trim()) {
+    return { ok: false, error: "Type a question first" };
+  }
+
+  const { pushFloorMessageToJobLog } = await import(
+    "@/lib/syncore/floor-message-push"
+  );
+  const result = await pushFloorMessageToJobLog({
+    jobId,
+    recipientDisplayName: recipient.displayName,
+    fromDisplayName: userName ?? "Floor",
+    body: body.trim(),
+  });
+
+  revalidatePath("/production");
+  if (result.ok) return { ok: true };
+  return { ok: false, error: result.error, status: result.status };
+}
