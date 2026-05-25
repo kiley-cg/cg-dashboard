@@ -29,7 +29,7 @@ Schedules in `vercel.json`:
 |---|---|---|---|
 | **SanMar** | ✅ live | `https://ws.sanmar.com:8080/promostandards/OrderShipmentNotificationServiceBinding?WSDL` | PromoStandards OSN 1.0.0 SOAP. Binding has **no version suffix**. Confirmed via SanMar PO Integration Guide v24.1. ~100% UPS in production data. |
 | **Cutter & Buck** | ✅ live | `https://api.cbcorporate.com/promostandards/OrderShipmentNotification.asmx?wsdl` | PromoStandards OSN 1.0.0 SOAP. Endpoint name **drops "Service"** — unlike their other endpoints (`InventoryService121`, `ProductData200`). Confirmed via C&B PromoStandards Integration Guide. Returns carrier "CI" for some shipments — actually UPS (tracking# starts with `1Z`), normalize if UPS-poll needs them. |
-| **S&S Activewear** | 🟡 in progress | `/invoices` (TBD) | REST API. `/orders` has no shipment data and ignores the `poNumber` filter — only `/invoices` carries tracking. Adapter switched to `/invoices` 2026-05-25 but endpoint shape still unverified. |
+| **S&S Activewear** | ✅ live | `/v2/orders/?Boxes=true&BoxLines=true&mediaType=json` | REST API. **No per-PO filter** — fetch the full open-orders list (cached 90s per cron sweep, single-flight) and match `order.poNumber` client-side. Tracking lives in `boxes[].trackingNumber`. Confirmed via S&S API Developer Guide. |
 
 ## Adapter pattern
 
@@ -145,8 +145,6 @@ curl -s -H "x-cron-secret: $SECRET" \
 
 ## Known gaps / next candidates
 
-- **S&S `/invoices` shape verification** — adapter switched but no
-  real-world response confirmed yet.
 - **FedEx + USPS Track** — not currently in pipeline. CG ships almost
   exclusively UPS via apparel vendors; CG decision was to use a
   headless browser for FedEx/USPS when needed.
