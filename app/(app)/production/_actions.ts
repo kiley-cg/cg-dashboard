@@ -330,10 +330,23 @@ export async function addTrackingAction(
   if (typeof trackingNumber !== "string" || !trackingNumber.trim()) {
     throw new Error("Tracking number is required");
   }
+  const cleanedTracking = trackingNumber.trim();
+  // Reject obvious test / placeholder values so they don't slip into
+  // the Syncore Job Log (and confuse anyone reading it later).
+  if (cleanedTracking.length < 8) {
+    throw new Error(
+      "Tracking number is too short — real UPS/FedEx/USPS numbers are at least 8 characters.",
+    );
+  }
+  if (/test/i.test(cleanedTracking) || /^1z[a-z]+$/i.test(cleanedTracking)) {
+    throw new Error(
+      "That looks like test data, not a real tracking number. Paste the actual number from the vendor.",
+    );
+  }
   await addTracking({
     poId,
     carrier,
-    trackingNumber: trackingNumber.trim(),
+    trackingNumber: cleanedTracking,
     userId,
   });
 
