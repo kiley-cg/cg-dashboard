@@ -17,6 +17,11 @@ import {
   fetchSanMarTracking,
   fetchSanMarTrackingRaw,
 } from "@/lib/vendors/sanmar/tracking";
+import { fetchSSTracking } from "@/lib/vendors/ss/tracking";
+import {
+  fetchCutterBuckTracking,
+  fetchCutterBuckTrackingRaw,
+} from "@/lib/vendors/cb/tracking";
 import type { OsnQueryType } from "@/lib/vendors/promostandards/orderShipmentNotification";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +45,26 @@ const SANMAR_OSN_CANDIDATES = [
   "https://ws.sanmar.com:8080/promostandards/ShipNoticeServiceBinding?WSDL",
   "https://ws.sanmar.com:8080/promostandards/ShipNoticeServiceBindingV1final?WSDL",
   "https://ws.sanmar.com:8080/promostandards/ShipNoticeServiceBindingV1?WSDL",
+];
+
+// Cutter & Buck runs IIS/.NET (.asmx paths). Their Inventory binding is
+// InventoryService121.asmx (PromoStandards 1.2.1). OSN versions we'll try.
+const CB_OSN_CANDIDATES = [
+  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService100.asmx?wsdl",
+  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService110.asmx?wsdl",
+  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService120.asmx?wsdl",
+  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService121.asmx?wsdl",
+  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService200.asmx?wsdl",
+  "https://api.cbcorporate.com/promostandards/OrderShipmentNotificationService.asmx?wsdl",
+];
+
+// S&S Activewear REST — path variants we'll try if the default 404s or
+// returns no shipments. ?poParam= overrides the query-param name too.
+const SS_TRACKING_PATH_CANDIDATES = [
+  { path: "/orders", poParamName: "poNumber" },
+  { path: "/orders", poParamName: "po" },
+  { path: "/orders", poParamName: "customerPO" },
+  { path: "/orders/", poParamName: "poNumber" },
 ];
 
 function authorize(req: Request): boolean {
@@ -81,12 +106,18 @@ export async function GET(req: Request) {
   // Use against any PO number — we just want to know which URL doesn't
   // 404. A 200 with a SOAP fault on getOrderShipmentNotification means
   // the WSDL was valid; a 404 means the path is wrong.
-  if (scan && vendor === "sanmar") {
+  if (scan && (vendor === "sanmar" || vendor === "cb")) {
+    const candidates =
+      vendor === "sanmar" ? SANMAR_OSN_CANDIDATES : CB_OSN_CANDIDATES;
+    const runOne =
+      vendor === "sanmar"
+        ? (wsdl: string) => fetchSanMarTracking(poNumber, { wsdlUrl: wsdl })
+        : (wsdl: string) => fetchCutterBuckTracking(poNumber, { wsdlUrl: wsdl });
     const startedAt = Date.now();
     const results = await Promise.all(
-      SANMAR_OSN_CANDIDATES.map(async (wsdl) => {
+      candidates.map(async (wsdl) => {
         try {
-          const shipments = await fetchSanMarTracking(poNumber, { wsdlUrl: wsdl });
+          const shipments = await runOne(wsdl);
           return {
             wsdl,
             outcome: "ok" as const,
@@ -94,7 +125,6 @@ export async function GET(req: Request) {
           };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          // Split "WSDL loaded but call faulted" vs "WSDL itself 404'd"
           const is404 = msg.includes("Code: 404") || msg.includes("Not Found");
           return {
             wsdl,
@@ -107,11 +137,46 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ok: true,
       mode: "scan",
+      vendor,
       poNumber,
-      // Anything not labeled wsdl-404 is a candidate — that means the
-      // WSDL itself loaded, even if the SOAP call faulted.
       candidates: results.filter((r) => r.outcome !== "wsdl-404"),
       all: results,
+      durationMs: Date.now() - startedAt,
+    });
+  }
+
+  // S&S has no WSDL — it's REST. The "scan" for S&S is the path+param
+  // matrix instead. Run all combinations and report which yielded
+  // shipments.
+  if (scan && vendor === "ss") {
+    const startedAt = Date.now();
+    const results = await Promise.all(
+      SS_TRACKING_PATH_CANDIDATES.map(async ({ path, poParamName }) => {
+        try {
+          const shipments = await fetchSSTracking(poNumber, { path, poParamName });
+          return {
+            path,
+            poParamName,
+            outcome: "ok" as const,
+            shipmentCount: shipments.length,
+          };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return {
+            path,
+            poParamName,
+            outcome: "error" as const,
+            error: msg.slice(0, 400),
+          };
+        }
+      }),
+    );
+    return NextResponse.json({
+      ok: true,
+      mode: "scan",
+      vendor,
+      poNumber,
+      results,
       durationMs: Date.now() - startedAt,
     });
   }
@@ -147,7 +212,24 @@ export async function GET(req: Request) {
         }
         break;
       case "ss":
+        shipments = await fetchSSTracking(poNumber);
+        break;
       case "cb":
+        if (includeRaw) {
+          const result = await fetchCutterBuckTrackingRaw(poNumber, {
+            wsdlUrl: wsdlOverride ?? undefined,
+            queryType,
+          });
+          shipments = result.shipments;
+          raw = result.raw;
+        } else {
+          shipments = await fetchCutterBuckTracking(poNumber, {
+            wsdlUrl: wsdlOverride ?? undefined,
+            queryType,
+          });
+        }
+        break;
+      case "_skip_":
         return NextResponse.json(
           {
             ok: false,
