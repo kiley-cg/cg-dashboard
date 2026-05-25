@@ -111,3 +111,46 @@ export async function reseedRoles(): Promise<void> {
   await seedRbac();
   revalidatePath("/admin/roles");
 }
+
+// One-shot migration: read every user's legacy `users.role` text column
+// and assign the matching RBAC role. Idempotent — re-runs do nothing
+// once everyone's been mapped. Safe to call from /admin/roles after a
+// fresh seed.
+//
+// Map:
+//   production       → production_floor
+//   csr              → csr
+//   sales            → csr      (no first-class sales role yet)
+//   sales_assistant  → viewer
+//   manager          → manager
+export async function migrateLegacyRoles(): Promise<void> {
+  await requireManager();
+  const { users } = await import("@/lib/db/schema");
+  const all = await db
+    .select({ id: users.id, role: users.role })
+    .from(users);
+
+  const roleMap: Record<string, string> = {
+    production: "production_floor",
+    csr: "csr",
+    sales: "csr",
+    sales_assistant: "viewer",
+    manager: "manager",
+  };
+
+  for (const u of all) {
+    const target = u.role ? roleMap[u.role] : null;
+    if (!target) continue;
+    const found = await db
+      .select({ id: schema.roles.id })
+      .from(schema.roles)
+      .where(eq(schema.roles.name, target))
+      .limit(1);
+    if (found.length === 0) continue;
+    await db
+      .insert(schema.userRoles)
+      .values({ userId: u.id, roleId: found[0].id })
+      .onConflictDoNothing();
+  }
+  revalidatePath("/admin/users");
+}

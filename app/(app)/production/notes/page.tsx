@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { hasRoleAccess } from "@/lib/roles";
+import { hasPermission } from "@/lib/rbac";
 import { listProductionNotes } from "@/lib/db/production-po";
 import {
   departmentForSupplier,
@@ -26,10 +26,10 @@ interface PageProps {
 
 export default async function ProductionNotesPage({ searchParams }: PageProps) {
   const session = await auth();
-  const allowed = await hasRoleAccess({
+  const allowed = await hasPermission({
     email: session?.user?.email,
     userId: session?.user?.id,
-    required: "production",
+    permission: "production.view",
   });
   if (!allowed) notFound();
 

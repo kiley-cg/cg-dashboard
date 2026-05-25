@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
-import { hasRoleAccess } from "@/lib/roles";
 import { hasPermission, getUserPermissions } from "@/lib/rbac";
 import { PERMISSION_KEYS } from "@/lib/permissions";
 import {
@@ -67,21 +66,11 @@ const DEPT_TITLE: Record<Department, string> = {
 
 export default async function ProductionPage({ searchParams }: PageProps) {
   const session = await auth();
-  // Try the RBAC gate first; fall back to legacy hasRoleAccess so the
-  // page stays reachable for users who haven't been migrated to a
-  // role with production.view yet. Drop this fallback once everyone
-  // has been assigned an RBAC role.
-  const allowed =
-    (await hasPermission({
-      email: session?.user?.email,
-      userId: session?.user?.id,
-      permission: "production.view",
-    })) ||
-    (await hasRoleAccess({
-      email: session?.user?.email,
-      userId: session?.user?.id,
-      required: "production",
-    }));
+  const allowed = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "production.view",
+  });
   if (!allowed) {
     notFound();
   }
