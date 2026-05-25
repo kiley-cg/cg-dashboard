@@ -130,10 +130,7 @@ async function handle(req: Request) {
   });
 }
 
-export async function GET(req: Request) {
-  return handle(req);
-}
+import { logCronRun } from "@/lib/cron/log";
 
-export async function POST(req: Request) {
-  return handle(req);
-}
+export const GET = logCronRun("/api/cron/snapshot-followups", handle);
+export const POST = logCronRun("/api/cron/snapshot-followups", handle);

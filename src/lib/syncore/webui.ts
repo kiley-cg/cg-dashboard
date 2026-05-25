@@ -243,6 +243,12 @@ export interface WebUiFetchInit {
   // (which JSON-encodes). Some Syncore endpoints (Job/AddTrackerEntryAsync,
   // legacy ASP.NET MVC AJAX actions) only accept form-encoded.
   formBody?: Record<string, string | number | boolean>;
+  // Pre-built request body for endpoints that need things formBody can't
+  // express — like ASP.NET's repeated-key array params (Name[]=a&Name[]=b).
+  // When set, Content-Type defaults to form-urlencoded; override with
+  // contentType.
+  rawBody?: string;
+  contentType?: string;
   // Override the default Referer. Some Syncore endpoints check Origin/Referer.
   referer?: string;
 }
@@ -265,7 +271,11 @@ export async function webuiFetch<T = unknown>(
     if (init.referer) headers["Referer"] = init.referer;
 
     let bodyStr: string | undefined;
-    if (init.formBody !== undefined) {
+    if (init.rawBody !== undefined) {
+      bodyStr = init.rawBody;
+      headers["Content-Type"] =
+        init.contentType ?? "application/x-www-form-urlencoded; charset=UTF-8";
+    } else if (init.formBody !== undefined) {
       const usp = new URLSearchParams();
       for (const [k, v] of Object.entries(init.formBody)) {
         usp.append(k, String(v));
@@ -426,6 +436,55 @@ export async function addJobTrackerEntry(args: {
         TextColor: args.color ?? JOB_LOG_COLOR.orange,
         Description: args.description,
       },
+      referer: `${WEB_BASE}/Job/Details/${jobId}`,
+    },
+  );
+  return result?.Result === true;
+}
+
+/**
+ * Post a Job Tracker entry that ALSO emails the listed recipients.
+ * Different endpoint from addJobTrackerEntry (silent log only) — this
+ * one fires Syncore's native notification flow.
+ *
+ * Request shape captured from a real HAR (Kiley 2026-05-25):
+ *   POST /Job/SendTrackerAsync
+ *   Body: Id=<jobId>&RecipientIds[]=<userId>&Priority=0&NoteColor=5&Notes=<body>
+ * Response: { Result: true, Message: "" }
+ *
+ * Returns true on success. Throws on auth / network failure.
+ */
+export async function sendJobTrackerEntry(args: {
+  jobId: string | number;
+  recipientUserIds: number[];
+  notes: string;
+  priority?: number; // 0 = normal, defaults to 0
+  noteColor?: number; // 5 = blue per the HAR; matches the in-UI color picker
+}): Promise<boolean> {
+  if (args.recipientUserIds.length === 0) {
+    throw new WebUiError("sendJobTrackerEntry requires at least one recipient");
+  }
+  const jobId = String(args.jobId);
+
+  // ASP.NET model binder expects RepeatedParam[] = value for each id —
+  // build the form body manually so the [] suffix survives the
+  // serializer. webuiFetch's formBody assumes string→string, which
+  // won't repeat keys.
+  const params = new URLSearchParams();
+  params.set("Id", jobId);
+  for (const uid of args.recipientUserIds) {
+    params.append("RecipientIds[]", String(uid));
+  }
+  params.set("Priority", String(args.priority ?? 0));
+  params.set("NoteColor", String(args.noteColor ?? 5));
+  params.set("Notes", args.notes);
+
+  const result = await webuiFetch<AddJobTrackerEntryResult>(
+    "/Job/SendTrackerAsync",
+    {
+      method: "POST",
+      rawBody: params.toString(),
+      contentType: "application/x-www-form-urlencoded; charset=UTF-8",
       referer: `${WEB_BASE}/Job/Details/${jobId}`,
     },
   );

@@ -495,6 +495,7 @@ export async function askAboutJobAction(
   const result = await pushFloorMessageToJobLog({
     jobId,
     recipientDisplayName: recipient.displayName,
+    recipientSyncoreUserId: recipient.syncoreUserId ?? null,
     fromDisplayName: userName ?? "Floor",
     body: body.trim(),
   });
