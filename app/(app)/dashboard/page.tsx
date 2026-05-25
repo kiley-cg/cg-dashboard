@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { isManager } from "@/lib/managers";
+import { PageHelp } from "../_components/PageHelp";
 import {
   getCsrDailyHistory,
   getLatestSnapshotPerCsr,
@@ -206,12 +207,15 @@ export default async function DashboardPage() {
             )}
           </p>
         </div>
-        <Link
-          href="/help/dashboard"
-          className="text-cg-info hover:underline text-sm"
-        >
-          Help &amp; FAQ →
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/help/dashboard"
+            className="text-cg-info hover:underline text-sm"
+          >
+            Help &amp; FAQ →
+          </Link>
+          <PageHelp slug="dashboard" title="Manager dashboard" />
+        </div>
       </header>
 
       <TeamSummary

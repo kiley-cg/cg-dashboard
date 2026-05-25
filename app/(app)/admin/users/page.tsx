@@ -6,6 +6,7 @@ import { db } from "@/lib/db/client";
 import { users, roles as rbacRoles, userRoles as rbacUserRoles } from "@/lib/db/schema";
 import { isManager } from "@/lib/managers";
 import { hasPermission } from "@/lib/rbac";
+import { PageHelp } from "../../_components/PageHelp";
 import {
   assignRoleToUser,
   inviteUser,
@@ -66,20 +67,23 @@ export default async function AdminUsersPage() {
 
   return (
     <section className="max-w-3xl mx-auto px-6 py-10 space-y-6">
-      <header>
-        <p className="text-cg-red text-xs font-semibold uppercase tracking-wider">
-          Admin
-        </p>
-        <h1 className="text-2xl font-extrabold tracking-tight mt-1">
-          User roles
-        </h1>
-        <p className="text-cg-n-600 mt-2 text-sm">
-          Set the surface a user lands on. Managers (per{" "}
-          <code className="text-xs bg-cg-n-100 px-1 py-0.5 rounded">
-            MANAGER_EMAILS
-          </code>
-          ) always pass every role gate regardless of the value here.
-        </p>
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-cg-red text-xs font-semibold uppercase tracking-wider">
+            Admin
+          </p>
+          <h1 className="text-2xl font-extrabold tracking-tight mt-1">
+            User roles
+          </h1>
+          <p className="text-cg-n-600 mt-2 text-sm">
+            Set the surface a user lands on. Managers (per{" "}
+            <code className="text-xs bg-cg-n-100 px-1 py-0.5 rounded">
+              MANAGER_EMAILS
+            </code>
+            ) always pass every role gate regardless of the value here.
+          </p>
+        </div>
+        <PageHelp slug="admin.users" title="Admin · Users" />
       </header>
 
       <div className="border border-cg-n-200 rounded-card p-4">

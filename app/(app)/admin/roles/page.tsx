@@ -4,6 +4,7 @@ import { asc, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
 import { hasPermission } from "@/lib/rbac";
+import { PageHelp } from "../../_components/PageHelp";
 import {
   createRole,
   deleteRole,
@@ -88,6 +89,7 @@ export default async function AdminRolesPage() {
               Migrate legacy roles
             </button>
           </form>
+          <PageHelp slug="admin.roles" title="Admin · Roles" />
         </div>
       </header>
 
