@@ -43,9 +43,34 @@ export function InboundSiblingsPanel({
     .filter((d): d is string => !!d)
     .sort()[0];
 
+  // "Ready by" = the latest known delivery date across every tracking
+  // entry on every open sibling PO. This is what matters for scheduling:
+  // we can't start decoration until the LAST package arrives, not when
+  // the FIRST one does. Falls back to in-hand date when no ETA is known.
+  const readyBy = (() => {
+    let max: string | null = null;
+    for (const s of siblings) {
+      for (const t of trackingBySibling[s.poId] ?? []) {
+        const date = t.eta;
+        if (date && (!max || date > max)) max = date;
+      }
+    }
+    return max;
+  })();
+
   const allClosed = open === 0;
   const trackingSuffix =
     inboundTrackingCount > 0 ? ` · ${inboundTrackingCount} tracking` : "";
+  // Prefer ready-by (real ETA data) over earliest-in-hand (vendor's
+  // promised date) once we have any tracking ETAs. The latter stays
+  // visible when no ETA is known yet so the floor still has a date.
+  const dateSuffix = !allClosed
+    ? readyBy
+      ? ` · ready by ${readyBy.slice(5)}`
+      : earliest
+        ? ` · earliest in-hand ${earliest.slice(5)}`
+        : ""
+    : "";
 
   return (
     <div className="mt-2 text-[12px]">
@@ -63,7 +88,7 @@ export function InboundSiblingsPanel({
         {allClosed
           ? `Apparel all closed (${total} PO${total === 1 ? "" : "s"})`
           : `${open}/${total} apparel PO${total === 1 ? "" : "s"} still open`}
-        {!allClosed && earliest ? ` · earliest in-hand ${earliest.slice(5)}` : ""}
+        {dateSuffix}
         {trackingSuffix}
         <span className="text-[10px] text-[#9B9588] ml-1" aria-hidden>
           {expanded ? "▴" : "▾"}
@@ -76,6 +101,15 @@ export function InboundSiblingsPanel({
             const count = trackingCountBySibling[s.poId] ?? 0;
             const entries = trackingBySibling[s.poId] ?? [];
             const trackingOpen = trackingOpenByPoId[s.poId] ?? false;
+            // Latest known ETA across this PO's tracking entries — the
+            // "this PO is ready" date that contributes to the job-level
+            // readyBy at the top of the panel.
+            let siblingReadyBy: string | null = null;
+            for (const t of entries) {
+              if (t.eta && (!siblingReadyBy || t.eta > siblingReadyBy)) {
+                siblingReadyBy = t.eta;
+              }
+            }
             return (
               <li key={s.poId} className="flex flex-col gap-1.5">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -94,6 +128,14 @@ export function InboundSiblingsPanel({
                   </div>
                   <div className="flex items-center gap-2 text-[11.5px] text-[#6B6356]">
                     {s.inHandDate && <span>in-hand {s.inHandDate.slice(5)}</span>}
+                    {siblingReadyBy && (
+                      <span
+                        className="text-[#3B6FB0]"
+                        title="Latest known UPS delivery date across this PO's tracking #s"
+                      >
+                        ready {siblingReadyBy.slice(5)}
+                      </span>
+                    )}
                     {count > 0 ? (
                       // Clickable when there are entries to show.
                       <button
