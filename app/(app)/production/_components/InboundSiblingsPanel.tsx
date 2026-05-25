@@ -128,26 +128,57 @@ export function InboundSiblingsPanel({
                 </div>
                 {trackingOpen && entries.length > 0 && (
                   <ul className="ml-[180px] space-y-0.5 text-[11.5px] text-[#3C342B]">
-                    {entries.map((t) => (
-                      <li
-                        key={t.id}
-                        className="flex items-center gap-2 font-mono"
-                      >
-                        <span className="text-[#6B6356] w-9 shrink-0 not-italic font-sans text-[11px] uppercase tracking-wider">
-                          {t.carrier}
-                        </span>
-                        <span className="select-all">{t.trackingNumber}</span>
-                        {t.source === "api" && (
-                          <span
-                            className="text-[9px] uppercase tracking-wider text-[#3B6FB0] font-sans"
-                            title="Auto-populated from vendor API"
-                          >
-                            api
+                    {entries.map((t) => {
+                      const delivered = (t.status ?? "")
+                        .toLowerCase()
+                        .includes("delivered");
+                      return (
+                        <li
+                          key={t.id}
+                          className="flex items-center gap-2 font-mono"
+                        >
+                          <span className="text-[#6B6356] w-9 shrink-0 not-italic font-sans text-[11px] uppercase tracking-wider">
+                            {t.carrier}
                           </span>
-                        )}
-                        <DeleteTrackingButton trackingId={t.id} />
-                      </li>
-                    ))}
+                          <span className="select-all">{t.trackingNumber}</span>
+                          {t.source === "api" && (
+                            <span
+                              className="text-[9px] uppercase tracking-wider text-[#3B6FB0] font-sans"
+                              title="Auto-populated from vendor API"
+                            >
+                              api
+                            </span>
+                          )}
+                          {t.eta && (
+                            <span
+                              className="text-[10.5px] font-sans text-[#6B6356]"
+                              title={
+                                delivered
+                                  ? "Actual delivery date"
+                                  : "Scheduled delivery (UPS)"
+                              }
+                            >
+                              {delivered ? "delivered " : "ETA "}
+                              {t.eta.slice(5)}
+                            </span>
+                          )}
+                          {t.status && (
+                            <span
+                              className={[
+                                "text-[10px] font-sans uppercase tracking-wider rounded px-1 py-px",
+                                delivered
+                                  ? "bg-[#E5F2E5] text-[#3A8C5F]"
+                                  : "bg-[#F0EEE6] text-[#6B6356]",
+                              ].join(" ")}
+                              title={t.status}
+                            >
+                              {abbrevStatus(t.status)}
+                            </span>
+                          )}
+                          <DeleteTrackingButton trackingId={t.id} />
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </li>
@@ -157,6 +188,20 @@ export function InboundSiblingsPanel({
       )}
     </div>
   );
+}
+
+// Shorten UPS status strings to a chip-sized abbreviation. Full text
+// is on the title= attribute for the curious. "Delivered" / "In Transit"
+// / "Out for Delivery" cover ~95% of in-the-wild values; anything else
+// falls through to the first 12 chars.
+function abbrevStatus(s: string): string {
+  const lower = s.toLowerCase();
+  if (lower.includes("delivered")) return "delivered";
+  if (lower.includes("out for delivery")) return "OFD";
+  if (lower.includes("in transit") || lower === "i") return "in transit";
+  if (lower.includes("origin scan") || lower.includes("label")) return "label";
+  if (lower.includes("exception") || lower.includes("delay")) return "exception";
+  return s.length > 12 ? s.slice(0, 12) + "…" : s;
 }
 
 // Send the PO's tracking numbers to Syncore as a Job Log entry — the

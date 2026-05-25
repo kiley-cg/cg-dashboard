@@ -20,6 +20,10 @@
     {
       "path": "/api/cron/poll-vendor-tracking",
       "schedule": "0 15,21 * * 1-5"
+    },
+    {
+      "path": "/api/cron/poll-carriers",
+      "schedule": "30 15,19,23 * * *"
     }
   ]
 }
