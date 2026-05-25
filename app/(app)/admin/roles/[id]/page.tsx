@@ -2,8 +2,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
-import { isManager } from "@/lib/managers";
 import { db, schema } from "@/lib/db/client";
+import { hasPermission } from "@/lib/rbac";
 import {
   PERMISSIONS,
   permissionsByScope,
@@ -26,7 +26,12 @@ const SCOPE_LABELS: Record<string, string> = {
 
 export default async function EditRolePage({ params }: PageProps) {
   const session = await auth();
-  if (!isManager(session?.user?.email)) notFound();
+  const allowed = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "admin.roles",
+  });
+  if (!allowed) notFound();
   const { id } = await params;
 
   const rows = await db

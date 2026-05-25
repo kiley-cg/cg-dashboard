@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { closeSyncorePo, setFloorStatus } from "../_actions";
+import { useCan } from "../../_components/UserPermissionsProvider";
 
 const STATUSES = ["stopped", "in_progress", "done"] as const;
 type Status = (typeof STATUSES)[number];
@@ -79,7 +80,8 @@ export function FloorStatusControl({
     });
   }
 
-  const showCloseButton = status === "done" && !syncoreClosedAt;
+  const canClose = useCan("production.close_syncore_po");
+  const showCloseButton = canClose && status === "done" && !syncoreClosedAt;
   const closedBadge = status === "done" && syncoreClosedAt;
 
   return (

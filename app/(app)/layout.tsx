@@ -3,6 +3,7 @@ import { auth, signOut } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 import { isManager } from "@/lib/managers";
 import { hasRoleAccess } from "@/lib/roles";
+import { hasPermission } from "@/lib/rbac";
 
 export default async function AppLayout({
   children,
@@ -10,13 +11,39 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
-  const showDashboard = isManager(session?.user?.email);
-  const showProduction = await hasRoleAccess({
+  // Permission-driven nav visibility. Each link asks "can this user
+  // see the dashboard?" rather than "what's their role?". Manager
+  // emails still pass automatically (superset). Production keeps a
+  // legacy hasRoleAccess fallback during the transition so existing
+  // users don't lose access mid-rollout.
+  const showProduction =
+    (await hasPermission({
+      email: session?.user?.email,
+      userId: session?.user?.id,
+      permission: "production.view",
+    })) ||
+    (await hasRoleAccess({
+      email: session?.user?.email,
+      userId: session?.user?.id,
+      required: "production",
+    }));
+  const showDashboard = await hasPermission({
     email: session?.user?.email,
     userId: session?.user?.id,
-    required: "production",
+    permission: "dashboard.view",
   });
-  const showAdmin = isManager(session?.user?.email);
+  // Admin nav appears when the user can manage any admin surface.
+  const showAdmin =
+    (await hasPermission({
+      email: session?.user?.email,
+      userId: session?.user?.id,
+      permission: "admin.users",
+    })) ||
+    (await hasPermission({
+      email: session?.user?.email,
+      userId: session?.user?.id,
+      permission: "admin.roles",
+    }));
 
   return (
     <div className="min-h-screen flex flex-col">

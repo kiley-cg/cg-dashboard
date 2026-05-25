@@ -6,6 +6,7 @@ import { db } from "@/lib/db/client";
 import { users, roles as rbacRoles, userRoles as rbacUserRoles } from "@/lib/db/schema";
 import { isManager } from "@/lib/managers";
 import { APP_ROLES, APP_ROLE_LABELS } from "@/lib/roles";
+import { hasPermission } from "@/lib/rbac";
 import {
   assignRoleToUser,
   inviteUser,
@@ -20,7 +21,15 @@ export const metadata = {
 
 export default async function AdminUsersPage() {
   const session = await auth();
-  if (!isManager(session?.user?.email)) {
+  // hasPermission already grants managers access via the email
+  // superset; this gates access to non-manager users who've been
+  // explicitly granted admin.users via RBAC.
+  const allowed = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "admin.users",
+  });
+  if (!allowed) {
     notFound();
   }
 

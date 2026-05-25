@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { bulkSchedulePos, bulkUnschedulePos } from "../_actions";
 import { useSelection } from "./SelectionProvider";
+import { useCan } from "../../_components/UserPermissionsProvider";
 
 interface DayOption {
   iso: string; // YYYY-MM-DD
@@ -16,8 +17,9 @@ interface DayOption {
 export function BulkScheduleBar({ days }: { days: DayOption[] }) {
   const { selected, clear } = useSelection();
   const [pending, startTransition] = useTransition();
+  const canBulkSchedule = useCan("production.bulk_schedule");
 
-  if (selected.size === 0) return null;
+  if (selected.size === 0 || !canBulkSchedule) return null;
 
   const poIds = Array.from(selected);
 

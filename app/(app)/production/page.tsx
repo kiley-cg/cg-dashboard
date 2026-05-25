@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { hasRoleAccess } from "@/lib/roles";
+import { hasPermission, getUserPermissions } from "@/lib/rbac";
+import { PERMISSION_KEYS } from "@/lib/permissions";
 import {
   getCustomerDisplayMap,
   getMostRecentMirrorAt,
@@ -30,6 +32,7 @@ import { FilterProvider } from "./_components/FilterProvider";
 import { FilterBar } from "./_components/FilterBar";
 import { ViewToggle } from "./_components/ViewToggle";
 import { WeekGridView } from "./_components/WeekGridView";
+import { UserPermissionsProvider } from "../_components/UserPermissionsProvider";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -62,14 +65,34 @@ const DEPT_TITLE: Record<Department, string> = {
 
 export default async function ProductionPage({ searchParams }: PageProps) {
   const session = await auth();
-  const allowed = await hasRoleAccess({
-    email: session?.user?.email,
-    userId: session?.user?.id,
-    required: "production",
-  });
+  // Try the RBAC gate first; fall back to legacy hasRoleAccess so the
+  // page stays reachable for users who haven't been migrated to a
+  // role with production.view yet. Drop this fallback once everyone
+  // has been assigned an RBAC role.
+  const allowed =
+    (await hasPermission({
+      email: session?.user?.email,
+      userId: session?.user?.id,
+      permission: "production.view",
+    })) ||
+    (await hasRoleAccess({
+      email: session?.user?.email,
+      userId: session?.user?.id,
+      required: "production",
+    }));
   if (!allowed) {
     notFound();
   }
+
+  // Compute every permission this user has up front so client
+  // components can hide controls without round-trips. Manager
+  // shortcircuit inside getUserPermissions returns all keys.
+  const userPermSet = await getUserPermissions({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permissions: PERMISSION_KEYS,
+  });
+  const userPermissions = Array.from(userPermSet);
 
   const today = pacificIsoDate();
   const params = await searchParams;
@@ -206,6 +229,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   }));
 
   return (
+    <UserPermissionsProvider permissions={userPermissions}>
     <SelectionProvider>
     <FilterProvider>
     <div className="min-h-screen bg-[#F7F5EF] text-[#1C2B27]">
@@ -408,6 +432,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     </div>
     </FilterProvider>
     </SelectionProvider>
+    </UserPermissionsProvider>
   );
 }
 
