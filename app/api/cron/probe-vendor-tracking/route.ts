@@ -60,10 +60,14 @@ const CB_OSN_CANDIDATES = [
 // S&S Activewear REST — path variants we'll try if the default 404s or
 // returns no shipments. ?poParam= overrides the query-param name too.
 const SS_TRACKING_PATH_CANDIDATES = [
+  // /invoices works but errors "Missing Input Value" on ?poNumber=...
+  // S&S's list endpoint is the documented filterable form.
+  { path: "/invoices/list", poParamName: "poNumber" },
+  { path: "/invoices/list", poParamName: "po" },
+  { path: "/invoices/list", poParamName: "customerPO" },
   { path: "/invoices", poParamName: "poNumber" },
-  { path: "/invoices", poParamName: "po" },
-  { path: "/invoices", poParamName: "customerPO" },
-  { path: "/invoices/", poParamName: "poNumber" },
+  { path: "/shipments", poParamName: "poNumber" },
+  { path: "/shipments/list", poParamName: "poNumber" },
   { path: "/orders", poParamName: "poNumber" },
 ];
 
