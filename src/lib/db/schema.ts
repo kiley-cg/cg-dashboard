@@ -379,3 +379,70 @@ export const poTracking = pgTable(
     idxPoId: index("po_tracking_po_id_idx").on(t.poId),
   }),
 );
+
+// --- RBAC (Role-Based Access Control) -----------------------------------
+//
+// New many-to-many model layered alongside the existing users.role text
+// column. The legacy column stays during transition; new code calls
+// hasPermission() against this graph instead of hasRoleAccess().
+//
+// Permission keys are well-known strings declared in src/lib/permissions.ts
+// (no separate `permissions` row table — keys live in code so feature gates
+// can be added in PRs without a DB write).
+//
+// Roles are admin-editable. Each role has a set of permission keys via
+// rolePermissions. Users have any number of roles via userRoles.
+
+export const roles = pgTable(
+  "rbac_role",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    // Lowercase machine name used in code references. Lower-snake_case.
+    name: text("name").notNull().unique(),
+    label: text("label").notNull(), // human-readable display
+    description: text("description"),
+    // System roles can't be deleted from the admin UI (admin / viewer);
+    // their permissions are still editable.
+    isSystem: boolean("is_system").notNull().default(false),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+);
+
+export const rolePermissions = pgTable(
+  "rbac_role_permission",
+  {
+    roleId: text("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    // Permission key — validated at write time against the catalog in
+    // src/lib/permissions.ts. Keep as text so a new permission can be
+    // added in code + assigned via UI without a schema change.
+    permissionKey: text("permission_key").notNull(),
+    grantedAt: timestamp("granted_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.roleId, t.permissionKey] }),
+    idxRole: index("rbac_role_permission_role_idx").on(t.roleId),
+  }),
+);
+
+export const userRoles = pgTable(
+  "rbac_user_role",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    roleId: text("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    assignedAt: timestamp("assigned_at", { mode: "date" }).notNull().defaultNow(),
+    assignedByUserId: text("assigned_by_user_id").references(() => users.id),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.roleId] }),
+    idxUser: index("rbac_user_role_user_idx").on(t.userId),
+  }),
+);
