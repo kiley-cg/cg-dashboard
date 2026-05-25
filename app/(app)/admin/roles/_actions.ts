@@ -1,0 +1,113 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { and, eq, inArray } from "drizzle-orm";
+import { auth } from "@/lib/auth";
+import { db, schema } from "@/lib/db/client";
+import { isManager } from "@/lib/managers";
+import { isPermissionKey, type PermissionKey } from "@/lib/permissions";
+import { seedRbac } from "@/lib/db/seed-rbac";
+
+async function requireManager(): Promise<void> {
+  const session = await auth();
+  if (!isManager(session?.user?.email)) {
+    throw new Error("Not authorized");
+  }
+}
+
+const SLUG_RX = /^[a-z][a-z0-9_]{0,40}$/;
+
+export async function createRole(formData: FormData): Promise<void> {
+  await requireManager();
+  const name = String(formData.get("name") ?? "").trim();
+  const label = String(formData.get("label") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim() || null;
+  if (!SLUG_RX.test(name)) {
+    throw new Error("Name must be lower_snake_case, 1-40 chars, start with a letter.");
+  }
+  if (!label) throw new Error("Label is required");
+  await db.insert(schema.roles).values({ name, label, description });
+  revalidatePath("/admin/roles");
+}
+
+export async function updateRoleMeta(formData: FormData): Promise<void> {
+  await requireManager();
+  const id = String(formData.get("id") ?? "");
+  if (!id) throw new Error("Missing id");
+  const label = String(formData.get("label") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim() || null;
+  if (!label) throw new Error("Label is required");
+  await db
+    .update(schema.roles)
+    .set({ label, description, updatedAt: new Date() })
+    .where(eq(schema.roles.id, id));
+  revalidatePath("/admin/roles");
+  revalidatePath(`/admin/roles/${id}`);
+}
+
+export async function deleteRole(formData: FormData): Promise<void> {
+  await requireManager();
+  const id = String(formData.get("id") ?? "");
+  if (!id) throw new Error("Missing id");
+  const existing = await db
+    .select({ isSystem: schema.roles.isSystem })
+    .from(schema.roles)
+    .where(eq(schema.roles.id, id))
+    .limit(1);
+  if (existing.length === 0) throw new Error("Role not found");
+  if (existing[0].isSystem) {
+    throw new Error("System roles can't be deleted (their permissions are still editable).");
+  }
+  await db.delete(schema.roles).where(eq(schema.roles.id, id));
+  revalidatePath("/admin/roles");
+}
+
+// Replace this role's permission set with the submitted list. Form posts
+// every checkbox state; we diff to the DB to avoid clobbering on race.
+export async function setRolePermissions(formData: FormData): Promise<void> {
+  await requireManager();
+  const id = String(formData.get("id") ?? "");
+  if (!id) throw new Error("Missing id");
+  const raw = formData.getAll("permission");
+  const selected: PermissionKey[] = [];
+  for (const v of raw) {
+    if (typeof v === "string" && isPermissionKey(v)) selected.push(v);
+  }
+  // Compute diff vs current
+  const current = await db
+    .select({ key: schema.rolePermissions.permissionKey })
+    .from(schema.rolePermissions)
+    .where(eq(schema.rolePermissions.roleId, id));
+  const currentSet = new Set(current.map((r) => r.key));
+  const selectedSet = new Set<string>(selected);
+
+  const toAdd = selected.filter((k) => !currentSet.has(k));
+  const toRemove = current
+    .map((r) => r.key)
+    .filter((k) => !selectedSet.has(k));
+
+  if (toAdd.length > 0) {
+    await db
+      .insert(schema.rolePermissions)
+      .values(toAdd.map((k) => ({ roleId: id, permissionKey: k })))
+      .onConflictDoNothing();
+  }
+  if (toRemove.length > 0) {
+    await db
+      .delete(schema.rolePermissions)
+      .where(
+        and(
+          eq(schema.rolePermissions.roleId, id),
+          inArray(schema.rolePermissions.permissionKey, toRemove),
+        ),
+      );
+  }
+  revalidatePath("/admin/roles");
+  revalidatePath(`/admin/roles/${id}`);
+}
+
+export async function reseedRoles(): Promise<void> {
+  await requireManager();
+  await seedRbac();
+  revalidatePath("/admin/roles");
+}

@@ -1,11 +1,17 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { asc } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db/client";
-import { users } from "@/lib/db/schema";
+import { users, roles as rbacRoles, userRoles as rbacUserRoles } from "@/lib/db/schema";
 import { isManager } from "@/lib/managers";
 import { APP_ROLES, APP_ROLE_LABELS } from "@/lib/roles";
-import { inviteUser, setUserRole } from "./actions";
+import {
+  assignRoleToUser,
+  inviteUser,
+  removeRoleFromUser,
+  setUserRole,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -27,6 +33,30 @@ export default async function AdminUsersPage() {
     })
     .from(users)
     .orderBy(asc(users.email));
+
+  // RBAC: all available roles + every user's assignments. Bucketed
+  // into a map for O(1) lookup in the table render.
+  const allRbacRoles = await db
+    .select({
+      id: rbacRoles.id,
+      name: rbacRoles.name,
+      label: rbacRoles.label,
+    })
+    .from(rbacRoles)
+    .orderBy(asc(rbacRoles.label));
+  const assignments = await db
+    .select({
+      userId: rbacUserRoles.userId,
+      roleId: rbacUserRoles.roleId,
+    })
+    .from(rbacUserRoles);
+  const userRoleIds = new Map<string, Set<string>>();
+  for (const a of assignments) {
+    const set = userRoleIds.get(a.userId) ?? new Set();
+    set.add(a.roleId);
+    userRoleIds.set(a.userId, set);
+  }
+  const roleById = new Map(allRbacRoles.map((r) => [r.id, r]));
 
   return (
     <section className="max-w-3xl mx-auto px-6 py-10 space-y-6">
@@ -97,14 +127,25 @@ export default async function AdminUsersPage() {
             <tr className="text-left">
               <th className="px-4 py-2 font-semibold">User</th>
               <th className="px-4 py-2 font-semibold">Email</th>
-              <th className="px-4 py-2 font-semibold w-48">Role</th>
+              <th className="px-4 py-2 font-semibold w-48">Legacy role</th>
+              <th className="px-4 py-2 font-semibold">
+                <div className="flex items-center gap-2">
+                  RBAC roles
+                  <Link
+                    href="/admin/roles"
+                    className="text-[10px] text-cg-teal hover:underline normal-case font-normal"
+                  >
+                    manage →
+                  </Link>
+                </div>
+              </th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={3}
+                  colSpan={4}
                   className="px-4 py-8 text-center text-cg-n-500 italic"
                 >
                   No users yet. They appear here after first sign-in.
@@ -149,6 +190,64 @@ export default async function AdminUsersPage() {
                         Save
                       </button>
                     </form>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {Array.from(userRoleIds.get(u.id) ?? []).map((rid) => {
+                        const r = roleById.get(rid);
+                        if (!r) return null;
+                        return (
+                          <form
+                            key={rid}
+                            action={removeRoleFromUser}
+                            className="inline-flex"
+                          >
+                            <input type="hidden" name="userId" value={u.id} />
+                            <input type="hidden" name="roleId" value={rid} />
+                            <button
+                              type="submit"
+                              title={`Remove ${r.label}`}
+                              className="inline-flex items-center gap-1 text-[11px] bg-cg-n-100 text-cg-n-700 rounded px-1.5 py-0.5 hover:bg-cg-red hover:text-white"
+                            >
+                              {r.label}
+                              <span className="text-[10px] opacity-70">×</span>
+                            </button>
+                          </form>
+                        );
+                      })}
+                      <form
+                        action={assignRoleToUser}
+                        className="inline-flex gap-1"
+                      >
+                        <input type="hidden" name="userId" value={u.id} />
+                        <select
+                          name="roleId"
+                          defaultValue=""
+                          required
+                          className="border border-cg-n-300 rounded-input px-1.5 py-0.5 bg-white text-[11px]"
+                        >
+                          <option value="" disabled>
+                            + add role…
+                          </option>
+                          {allRbacRoles
+                            .filter(
+                              (r) =>
+                                !(userRoleIds.get(u.id) ?? new Set()).has(r.id),
+                            )
+                            .map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {r.label}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="submit"
+                          className="text-[11px] border border-cg-teal text-cg-teal rounded px-1.5 py-0.5 hover:bg-cg-teal hover:text-white"
+                        >
+                          Add
+                        </button>
+                      </form>
+                    </div>
                   </td>
                 </tr>
               );
