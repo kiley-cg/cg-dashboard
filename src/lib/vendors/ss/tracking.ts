@@ -44,7 +44,9 @@ export async function fetchSSTrackingRaw(
     );
   }
   const base = (opts.apiBase ?? process.env.SS_API_BASE_URL?.trim() ?? DEFAULT_API_BASE).replace(/\/+$/, "");
-  const path = opts.path ?? "/invoices";
+  // /invoices/list is the filterable form. /invoices wants a specific
+  // invoiceNumber, /orders ignores the poNumber filter entirely.
+  const path = opts.path ?? "/invoices/list";
   const param = opts.poParamName ?? "poNumber";
 
   const authHeader =
