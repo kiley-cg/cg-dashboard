@@ -91,15 +91,43 @@ export function PoCard({
   const floorStatus = asFloorStatus(state?.floorStatus);
   const isDone = floorStatus === "done";
 
+  // "Inbound ready" — every apparel sibling PO is either Syncore-closed
+  // OR has all tracking entries marked delivered. Mirrors the logic in
+  // InboundSiblingsPanel so the tile background, the rollup text, and
+  // the "Waiting on / All delivered" copy stay in sync.
+  const inboundReady =
+    apparelSiblings.length > 0 &&
+    apparelSiblings.every((s) => {
+      const isOpen = s.status === "Open" || s.status === "Approved";
+      if (!isOpen) return true;
+      const entries = trackingBySibling[s.poId] ?? [];
+      return (
+        entries.length > 0 &&
+        entries.every((t) =>
+          (t.status ?? "").toLowerCase().includes("delivered"),
+        )
+      );
+    });
+
+  // When all apparel is here, swap the tile's tint to a clear green so
+  // the floor can scan a whole day's queue and spot what's actionable.
+  // Don't override the department's left-border color — the department
+  // chip is still the primary identifier.
+  const READY_TINT = "#E5F2E5";
+  const READY_BORDER = "#3A8C5F";
+  const bgColor = inboundReady && !isDone ? READY_TINT : chip.tint;
+
   return (
     <article
       style={{
         borderLeftColor: chip.color,
         borderLeftWidth: 6,
-        backgroundColor: chip.tint,
+        backgroundColor: bgColor,
+        borderColor: inboundReady && !isDone ? READY_BORDER : "#E3DFD3",
+        borderWidth: inboundReady && !isDone ? 2 : 1,
       }}
       className={[
-        "flex gap-3.5 p-4 pl-[11px] border border-[#E3DFD3] rounded-card hover:-translate-y-px hover:shadow-md transition",
+        "flex gap-3.5 p-4 pl-[11px] rounded-card hover:-translate-y-px hover:shadow-md transition",
         isDone ? "opacity-60" : "",
       ].join(" ")}
     >
