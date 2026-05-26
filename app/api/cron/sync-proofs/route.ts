@@ -49,6 +49,12 @@ async function handler(req: Request): Promise<NextResponse> {
   // configured Shared Drive root. Used for range-folder backfills
   // (e.g. one of the "30000-30999" folders).
   const rootFolderId = url.searchParams.get("rootFolderId") ?? undefined;
+  // ?limit=N → cap PDFs processed per call (chunk a large backfill).
+  const limitParam = url.searchParams.get("limit");
+  const limit = limitParam ? Number(limitParam) : undefined;
+  // ?concurrency=N → parallel PDF downloads. Default 4.
+  const concurrencyParam = url.searchParams.get("concurrency");
+  const concurrency = concurrencyParam ? Number(concurrencyParam) : undefined;
 
   const startedAt = Date.now();
   try {
@@ -56,6 +62,9 @@ async function handler(req: Request): Promise<NextResponse> {
       modifiedAfter,
       parseSpec,
       rootFolderId,
+      limit: Number.isFinite(limit) && limit! > 0 ? limit : undefined,
+      concurrency:
+        Number.isFinite(concurrency) && concurrency! > 0 ? concurrency : undefined,
     });
     const summary = {
       proofCount: results.length,
@@ -65,6 +74,8 @@ async function handler(req: Request): Promise<NextResponse> {
       modifiedAfter: modifiedAfter.toISOString(),
       parseSpec,
       rootFolderId: rootFolderId ?? null,
+      limit: limit ?? null,
+      concurrency: concurrency ?? null,
       durationMs: Date.now() - startedAt,
     };
     return NextResponse.json({ ok: true, summary });
