@@ -51,7 +51,7 @@ const SEED_ROLES: SeedRole[] = [
   },
   {
     name: "production_floor",
-    label: "Production Floor",
+    label: "Production",
     description: "Schedule POs, set floor status, log tracking.",
     isSystem: false,
     permissions: [
