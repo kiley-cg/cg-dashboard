@@ -63,9 +63,15 @@ export async function deleteHelpDoc(formData: FormData): Promise<void> {
 // One-click: insert default SOP content for every well-known slug
 // (production / inventory / dashboard / admin.*). Idempotent — skips
 // slugs that already have a row so admin edits aren't clobbered.
-export async function seedDefaultHelpDocs(): Promise<void> {
+export async function seedDefaultHelpDocs(
+  _prevState: string | null,
+): Promise<string> {
   await requireAdmin();
   const { seedHelpDocs } = await import("@/lib/db/seed-help");
-  await seedHelpDocs();
+  const result = await seedHelpDocs();
   revalidatePath("/admin/help");
+  if (result.inserted === 0) {
+    return `All ${result.skipped} default help docs already present.`;
+  }
+  return `Inserted ${result.inserted} default help doc${result.inserted === 1 ? "" : "s"} (${result.skipped} already present).`;
 }

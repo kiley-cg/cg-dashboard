@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
 import { hasPermission } from "@/lib/rbac";
 import { PageHelp } from "../../_components/PageHelp";
+import { ActionForm } from "../../_components/ActionForm";
 import { seedDefaultHelpDocs } from "./_actions";
 
 export const dynamic = "force-dynamic";
@@ -74,16 +75,13 @@ export default async function AdminHelpPage() {
             Each dashboard has a <code className="bg-cg-n-100 px-1 rounded text-xs">?</code> button that opens a help drawer. The drawer renders this content as markdown. Edit any slug below; changes apply immediately (no deploy needed).
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <form action={seedDefaultHelpDocs}>
-            <button
-              type="submit"
-              className="text-xs border border-cg-n-300 rounded-input px-3 py-1.5 hover:bg-cg-n-100"
-              title="Insert default SOP content for known slugs. Won't overwrite anything you've edited."
-            >
-              Seed defaults
-            </button>
-          </form>
+        <div className="flex items-center gap-2 flex-wrap">
+          <ActionForm
+            action={seedDefaultHelpDocs}
+            label="Seed defaults"
+            loadingLabel="Seeding…"
+            title="Insert default SOP content for known slugs. Won't overwrite anything you've edited."
+          />
           <PageHelp slug="admin.help" title="Admin · Help docs" />
         </div>
       </header>

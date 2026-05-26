@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
 import { hasPermission } from "@/lib/rbac";
 import { PageHelp } from "../../_components/PageHelp";
+import { ActionForm } from "../../_components/ActionForm";
 import {
   createRole,
   deleteRole,
@@ -70,25 +71,19 @@ export default async function AdminRolesPage() {
             page.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <form action={reseedRoles}>
-            <button
-              type="submit"
-              className="text-xs border border-cg-n-300 rounded-input px-3 py-1.5 hover:bg-cg-n-100"
-              title="Add any missing default roles (admin/manager/csr/floor/viewer). Won't overwrite custom edits."
-            >
-              Re-seed defaults
-            </button>
-          </form>
-          <form action={migrateLegacyRoles}>
-            <button
-              type="submit"
-              className="text-xs border border-cg-n-300 rounded-input px-3 py-1.5 hover:bg-cg-n-100"
-              title="Map every user's legacy role text column to the matching RBAC role. Idempotent."
-            >
-              Migrate legacy roles
-            </button>
-          </form>
+        <div className="flex items-center gap-2 flex-wrap">
+          <ActionForm
+            action={reseedRoles}
+            label="Re-seed defaults"
+            loadingLabel="Re-seeding…"
+            title="Add any missing default roles (admin/manager/csr/floor/viewer). Won't overwrite custom edits."
+          />
+          <ActionForm
+            action={migrateLegacyRoles}
+            label="Migrate legacy roles"
+            loadingLabel="Migrating…"
+            title="Map every user's legacy role text column to the matching RBAC role. Idempotent."
+          />
           <PageHelp slug="admin.roles" title="Admin · Roles" />
         </div>
       </header>
