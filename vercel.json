@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/snapshot-tracker-entries",
       "schedule": "0,30 * * * *"
+    },
+    {
+      "path": "/api/cron/sync-proofs",
+      "schedule": "15 14-23 * * 1-5"
     }
   ]
 }
