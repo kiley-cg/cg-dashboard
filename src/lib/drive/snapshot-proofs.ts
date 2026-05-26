@@ -36,17 +36,6 @@ export async function snapshotProofs(opts?: {
 
   const results: SnapshotResult[] = [];
   for (const p of proofs) {
-    if (!p.jobId) {
-      results.push({
-        fileId: p.fileId,
-        filename: p.filename,
-        jobId: null,
-        outcome: "skipped",
-        reason: "no job# in filename",
-      });
-      continue;
-    }
-
     let extracted: ProofSpec | undefined;
     if (parseSpec) {
       try {
@@ -54,17 +43,35 @@ export async function snapshotProofs(opts?: {
         const text = await parsePdfText(bytes);
         extracted = extractProofSpec(text);
       } catch {
-        // PDF parse / download failure isn't fatal — write the stub row
-        // with file metadata; the admin probe can flag and re-parse.
         extracted = undefined;
       }
     }
 
-    const outcome = await upsertOne(p, extracted);
+    // Resolve effective job ID: prefer filename (cheap), fall back to
+    // PDF text. CG embroidery proofs use Art# in the filename, so the
+    // PDF body's "PROOF 32353" is usually the canonical source.
+    const effectiveJobId = p.jobId ?? extracted?.jobIdFromText ?? null;
+
+    if (!effectiveJobId) {
+      results.push({
+        fileId: p.fileId,
+        filename: p.filename,
+        jobId: null,
+        outcome: "skipped",
+        reason: "no job# in filename OR PDF body",
+        extracted,
+      });
+      continue;
+    }
+
+    const outcome = await upsertOne(
+      { ...p, jobId: effectiveJobId },
+      extracted,
+    );
     results.push({
       fileId: p.fileId,
       filename: p.filename,
-      jobId: p.jobId,
+      jobId: effectiveJobId,
       outcome,
       extracted,
     });
@@ -116,6 +123,11 @@ async function upsertOne(
     modifiedAt: p.modifiedAt,
     extracted: extracted
       ? {
+          // Bonus embroidery fields — surfaced here for the upcoming
+          // Production Worksheet matrix (D2.C).
+          decoration: extracted.decoration,
+          stitches: extracted.stitches,
+          jobIdFromText: extracted.jobIdFromText,
           matchedSnippets: extracted.matchedSnippets,
         }
       : undefined,
