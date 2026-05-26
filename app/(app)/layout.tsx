@@ -5,6 +5,7 @@ import { Logo } from "@/components/Logo";
 import { hasPermission } from "@/lib/rbac";
 import { db, schema } from "@/lib/db/client";
 import { matchCsrByName, ROUTABLE_PEOPLE } from "@/lib/people/registry";
+import { AdminMenu } from "./_components/AdminMenu";
 
 export default async function AppLayout({
   children,
@@ -81,23 +82,29 @@ export default async function AppLayout({
       }
     }
   }
-  // Admin nav appears when the user can manage any admin surface.
-  const showAdmin =
-    (await hasPermission({
-      email: session?.user?.email,
-      userId: session?.user?.id,
-      permission: "admin.users",
-    })) ||
-    (await hasPermission({
-      email: session?.user?.email,
-      userId: session?.user?.id,
-      permission: "admin.roles",
-    })) ||
-    (await hasPermission({
-      email: session?.user?.email,
-      userId: session?.user?.id,
-      permission: "admin.crons",
-    }));
+  // Per-admin-page permissions — used to populate the Admin dropdown
+  // with only the links this user can actually open.
+  const canUsers = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "admin.users",
+  });
+  const canRoles = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "admin.roles",
+  });
+  const canCrons = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "admin.crons",
+  });
+  const canHelp = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "admin.help",
+  });
+  const showAdmin = canUsers || canRoles || canCrons || canHelp;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -148,12 +155,14 @@ export default async function AppLayout({
               </Link>
             )}
             {showAdmin && (
-              <Link
-                href="/admin/users"
-                className="text-cg-n-300 hover:text-white transition"
-              >
-                Admin
-              </Link>
+              <AdminMenu
+                items={[
+                  { href: "/admin/users", label: "Users", show: canUsers },
+                  { href: "/admin/roles", label: "Roles", show: canRoles },
+                  { href: "/admin/crons", label: "Crons", show: canCrons },
+                  { href: "/admin/help", label: "Help docs", show: canHelp },
+                ]}
+              />
             )}
             {session?.user?.email && (
               <span className="text-cg-n-300">{session.user.email}</span>
