@@ -45,10 +45,18 @@ async function handler(req: Request): Promise<NextResponse> {
   // Useful as a fast connectivity probe when troubleshooting auth.
   const parseSpecParam = url.searchParams.get("parseSpec");
   const parseSpec = parseSpecParam === "false" ? false : true;
+  // ?rootFolderId=<id> → walk a specific subfolder instead of the
+  // configured Shared Drive root. Used for range-folder backfills
+  // (e.g. one of the "30000-30999" folders).
+  const rootFolderId = url.searchParams.get("rootFolderId") ?? undefined;
 
   const startedAt = Date.now();
   try {
-    const results = await snapshotProofs({ modifiedAfter, parseSpec });
+    const results = await snapshotProofs({
+      modifiedAfter,
+      parseSpec,
+      rootFolderId,
+    });
     const summary = {
       proofCount: results.length,
       inserted: results.filter((r) => r.outcome === "inserted").length,
@@ -56,6 +64,7 @@ async function handler(req: Request): Promise<NextResponse> {
       skipped: results.filter((r) => r.outcome === "skipped").length,
       modifiedAfter: modifiedAfter.toISOString(),
       parseSpec,
+      rootFolderId: rootFolderId ?? null,
       durationMs: Date.now() - startedAt,
     };
     return NextResponse.json({ ok: true, summary });

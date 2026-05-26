@@ -30,8 +30,14 @@ export async function snapshotProofs(opts?: {
   // D2.B: extract PDF text + parse spec fields. Defaults to true;
   // pass false for a metadata-only sweep (faster, no Drive download).
   parseSpec?: boolean;
+  // Override the configured root folder. Used for range-folder backfills
+  // (e.g. "30000-30999") so one Vercel call covers a bounded chunk.
+  rootFolderId?: string;
 }): Promise<SnapshotResult[]> {
-  const proofs = await listProofs({ modifiedAfter: opts?.modifiedAfter });
+  const proofs = await listProofs({
+    modifiedAfter: opts?.modifiedAfter,
+    rootFolderId: opts?.rootFolderId,
+  });
   const parseSpec = opts?.parseSpec ?? true;
 
   const results: SnapshotResult[] = [];
