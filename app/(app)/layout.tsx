@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { auth, signOut } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 import { hasPermission } from "@/lib/rbac";
+import { db, schema } from "@/lib/db/client";
+import { matchCsrByName, ROUTABLE_PEOPLE } from "@/lib/people/registry";
 
 export default async function AppLayout({
   children,
@@ -22,6 +25,46 @@ export default async function AppLayout({
     userId: session?.user?.id,
     permission: "dashboard.view",
   });
+  const showInbox = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "inbox.view",
+  });
+  // Inbox "open" count for the nav badge. Only meaningful for users
+  // who are mapped to a Syncore userId in the registry.
+  let inboxOpenCount = 0;
+  if (showInbox) {
+    const me =
+      matchCsrByName(session?.user?.name ?? null) ??
+      ROUTABLE_PEOPLE.find((p) => p.displayName === session?.user?.name) ??
+      null;
+    if (me?.syncoreUserId) {
+      const rows = await db
+        .select({ n: sql<number>`COUNT(*)::int` })
+        .from(schema.trackerEntriesCache)
+        .leftJoin(
+          schema.trackerInboxState,
+          and(
+            eq(
+              schema.trackerInboxState.syncoreEntryId,
+              schema.trackerEntriesCache.syncoreEntryId,
+            ),
+            eq(
+              schema.trackerInboxState.recipientUserId,
+              me.syncoreUserId,
+            ),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.trackerEntriesCache.entryType, 3),
+            sql`${schema.trackerEntriesCache.recipientUserIds} @> ${JSON.stringify([me.syncoreUserId])}::jsonb`,
+            isNull(schema.trackerInboxState.handledAt),
+          ),
+        );
+      inboxOpenCount = rows[0]?.n ?? 0;
+    }
+  }
   // Admin nav appears when the user can manage any admin surface.
   const showAdmin =
     (await hasPermission({
@@ -65,6 +108,19 @@ export default async function AppLayout({
                 className="text-cg-n-300 hover:text-white transition"
               >
                 Dashboard
+              </Link>
+            )}
+            {showInbox && (
+              <Link
+                href="/inbox"
+                className="text-cg-n-300 hover:text-white transition inline-flex items-center gap-1.5"
+              >
+                Inbox
+                {inboxOpenCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-cg-red text-white text-[10px] font-bold">
+                    {inboxOpenCount}
+                  </span>
+                )}
               </Link>
             )}
             {showAdmin && (

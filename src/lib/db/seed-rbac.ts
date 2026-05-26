@@ -38,13 +38,14 @@ const SEED_ROLES: SeedRole[] = [
   {
     name: "csr",
     label: "CSR",
-    description: "Inventory verification + production view + manual tracking entry.",
+    description: "Inventory verification + production view + manual tracking entry + inbox.",
     isSystem: false,
     permissions: [
       "inventory.view",
       "inventory.verify",
       "production.view",
       "production.add_tracking",
+      "inbox.view",
     ],
   },
   {
@@ -59,6 +60,7 @@ const SEED_ROLES: SeedRole[] = [
       "production.set_floor_status",
       "production.add_tracking",
       "production.edit_notes",
+      "inbox.view",
     ],
   },
   {

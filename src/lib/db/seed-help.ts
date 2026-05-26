@@ -228,6 +228,41 @@ All 5 current crons log to \`cron_runs\`:
 `,
   },
   {
+    slug: "inbox",
+    title: "Inbox",
+    bodyMd: `# Inbox
+
+Consolidated view of every Syncore Job Tracker entry addressed to you across all active jobs. Pair to the floor's **Send Job Tracker** button on \`/production\` — when Kristen pings you with a question, it lands here.
+
+## Where the data comes from
+
+A snapshot cron runs **every 30 minutes** and pulls tracker entries from every active job in the production mirror into a local cache. The inbox view reads from that cache (fast, doesn't hit Syncore live).
+
+If you need fresher data right now, hit **Refresh** at the top of the page — it fires the same path on-demand.
+
+## Per-row actions
+
+- **Reply** opens a composer pre-targeted to the sender. Sends via Syncore's \`SendTrackerAsync\` (same as the floor side), which posts to the job's Job Log AND emails the recipient.
+- **Mark handled** writes a per-recipient state row. Doesn't touch Syncore — it's a local "I dealt with this" flag. The row fades, count chip + nav badge drop by one. Click again to unhandle.
+
+## Filters
+
+- **Open** (default) — entries you haven't marked handled yet
+- **Handled** — your archive
+- **All** — everything addressed to you
+
+## Manager view (\`inbox.view_all\`)
+
+Managers see a dropdown to switch the inbox view to anyone else's queue — useful when someone's out and you need to triage.
+
+## When messages don't show up
+
+- **Sender's Syncore user ID not in the registry** — for entries to attribute to you, the sender's tracker recipient list (parsed from Syncore's "email sent to X" auto-row) must match a person in \`src/lib/people/registry.ts\` with your \`syncoreUserId\`. Missing IDs today: Jeremiah, Tricia, Voshte.
+- **Snapshot cron hasn't run yet** — hit **Refresh**.
+- **Entry type wasn't a human note** — only \`entryType=3\` (the actual message) shows up; the auto-rows that follow (\`entryType=2\`) are used internally for recipient extraction.
+`,
+  },
+  {
     slug: "admin.help",
     title: "Admin · Help docs",
     bodyMd: `# Help docs admin

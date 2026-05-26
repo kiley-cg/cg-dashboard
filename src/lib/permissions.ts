@@ -77,6 +77,16 @@ export const PERMISSIONS = {
     label: "Edit help docs",
     description: "Create + edit the SOP / help content shown in each dashboard's help drawer.",
   },
+
+  // Inbox / two-way channel (Phase C)
+  "inbox.view": {
+    label: "View own inbox",
+    description: "See tracker entries addressed to you (the Phase C inbox).",
+  },
+  "inbox.view_all": {
+    label: "View everyone's inbox",
+    description: "Manager triage view — see and act on any user's inbox queue.",
+  },
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
