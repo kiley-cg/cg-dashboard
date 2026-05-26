@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
 import { hasPermission } from "@/lib/rbac";
@@ -54,9 +54,13 @@ async function authorize(): Promise<{
  * Drop a decoration PO onto a specific day. Upserts po_schedule_state
  * with scheduled_date = the given Pacific YYYY-MM-DD. Idempotent — calling
  * again with a different date moves the PO without leaving stale rows.
+ *
+ * Posts a Syncore Job Tracker entry on first-schedule and on re-schedule
+ * so CSRs see "this is on Wed" without having to come back into the
+ * dashboard. Skips the post if the date is unchanged (no-op re-save).
  */
 export async function schedulePo(formData: FormData): Promise<void> {
-  await authorize();
+  const { userName } = await authorize();
 
   const poId = formData.get("poId");
   const scheduledDate = formData.get("scheduledDate");
@@ -64,6 +68,15 @@ export async function schedulePo(formData: FormData): Promise<void> {
   if (typeof scheduledDate !== "string" || !ISO_DATE_RX.test(scheduledDate)) {
     throw new Error("scheduledDate must be YYYY-MM-DD");
   }
+
+  // Read prior date so we know whether to post (and whether it's a
+  // re-schedule vs first-schedule). Doing this BEFORE the upsert.
+  const prior = await db
+    .select({ scheduledDate: schema.poScheduleState.scheduledDate })
+    .from(schema.poScheduleState)
+    .where(eq(schema.poScheduleState.poId, poId))
+    .limit(1);
+  const priorDate = prior[0]?.scheduledDate ?? null;
 
   await db
     .insert(schema.poScheduleState)
@@ -76,6 +89,15 @@ export async function schedulePo(formData: FormData): Promise<void> {
       },
     });
 
+  if (priorDate !== scheduledDate) {
+    await postScheduleChangeToJobLog({
+      poId,
+      newDate: scheduledDate,
+      priorDate,
+      userName,
+    });
+  }
+
   revalidatePath("/production");
 }
 
@@ -83,9 +105,12 @@ export async function schedulePo(formData: FormData): Promise<void> {
  * Bulk variant of schedulePo — assigns the same date to many POs in
  * one transaction. Used by the BulkScheduleBar when the floor wants
  * to drop a batch of POs onto the same day at once.
+ *
+ * Posts a Job Tracker entry per PO whose date actually changed
+ * (idempotent — re-running with the same date is a no-op writeback).
  */
 export async function bulkSchedulePos(formData: FormData): Promise<void> {
-  await authorize();
+  const { userName } = await authorize();
 
   const poIds = formData.getAll("poIds").filter((v): v is string => typeof v === "string");
   const scheduledDate = formData.get("scheduledDate");
@@ -93,6 +118,17 @@ export async function bulkSchedulePos(formData: FormData): Promise<void> {
   if (typeof scheduledDate !== "string" || !ISO_DATE_RX.test(scheduledDate)) {
     throw new Error("scheduledDate must be YYYY-MM-DD");
   }
+
+  // Snapshot prior dates so we can post Job Tracker entries only for
+  // POs that actually changed.
+  const priorRows = await db
+    .select({
+      poId: schema.poScheduleState.poId,
+      scheduledDate: schema.poScheduleState.scheduledDate,
+    })
+    .from(schema.poScheduleState)
+    .where(inArray(schema.poScheduleState.poId, poIds));
+  const priorMap = new Map(priorRows.map((r) => [r.poId, r.scheduledDate]));
 
   const now = new Date();
   await db
@@ -105,6 +141,18 @@ export async function bulkSchedulePos(formData: FormData): Promise<void> {
         updatedAt: now,
       },
     });
+
+  for (const poId of poIds) {
+    const priorDate = priorMap.get(poId) ?? null;
+    if (priorDate !== scheduledDate) {
+      await postScheduleChangeToJobLog({
+        poId,
+        newDate: scheduledDate,
+        priorDate,
+        userName,
+      });
+    }
+  }
 
   revalidatePath("/production");
 }
@@ -288,8 +336,89 @@ export async function closeSyncorePo(
     .set({ syncoreClosedAt: new Date(), updatedAt: new Date() })
     .where(eq(schema.poScheduleState.poId, poId));
 
+  // Post a Job Tracker entry confirming the close — gives CSRs the
+  // "this is done in-house" signal without having to scroll the Syncore
+  // PO list for the status flip. Best-effort; swallow errors so a
+  // tracker-post failure doesn't undo a successful close.
+  try {
+    const mirrorRow = await db
+      .select({
+        poNumber: schema.productionPoMirror.poNumber,
+        supplierName: schema.productionPoMirror.supplierName,
+      })
+      .from(schema.productionPoMirror)
+      .where(eq(schema.productionPoMirror.poId, poId))
+      .limit(1);
+    const poLabel =
+      mirrorRow[0]?.poNumber != null
+        ? `${jobId}-${mirrorRow[0].poNumber}`
+        : poId;
+    const supplierTail = mirrorRow[0]?.supplierName
+      ? ` (${mirrorRow[0].supplierName})`
+      : "";
+    const who = userName ?? "Production";
+    await addJobTrackerEntry({
+      jobId,
+      description: `Production complete — PO ${poLabel}${supplierTail} closed in Syncore by ${who}.`,
+    });
+  } catch {
+    // Tracker post failure shouldn't roll back the close.
+  }
+
   revalidatePath("/production");
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Job Tracker writeback for schedule changes.
+// ---------------------------------------------------------------------------
+
+// "Mon May 26" from a YYYY-MM-DD. Pacific local — these dates are
+// already Pacific calendar days, no timezone math needed.
+function formatScheduleDate(iso: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC", // iso is already a Pacific calendar day
+  }).format(new Date(`${iso}T12:00:00Z`));
+}
+
+async function postScheduleChangeToJobLog(args: {
+  poId: string;
+  newDate: string;
+  priorDate: string | null;
+  userName: string | null;
+}): Promise<void> {
+  try {
+    const mirrorRow = await db
+      .select({
+        syncoreJobId: schema.productionPoMirror.syncoreJobId,
+        poNumber: schema.productionPoMirror.poNumber,
+        supplierName: schema.productionPoMirror.supplierName,
+      })
+      .from(schema.productionPoMirror)
+      .where(eq(schema.productionPoMirror.poId, args.poId))
+      .limit(1);
+    const row = mirrorRow[0];
+    if (!row) return;
+    const poLabel =
+      row.poNumber != null ? `${row.syncoreJobId}-${row.poNumber}` : args.poId;
+    const supplierTail = row.supplierName ? ` (${row.supplierName})` : "";
+    const who = args.userName ? ` by ${args.userName}` : "";
+    const verb = args.priorDate ? "Production rescheduled" : "Production scheduled";
+    const fromTail = args.priorDate
+      ? ` (was ${formatScheduleDate(args.priorDate)})`
+      : "";
+    const description = `${verb} for ${formatScheduleDate(args.newDate)} — PO ${poLabel}${supplierTail}${fromTail}${who}.`;
+    await addJobTrackerEntry({
+      jobId: row.syncoreJobId,
+      description,
+    });
+  } catch {
+    // Tracker post failure shouldn't roll back the local schedule
+    // change — the floor still gets the PO on their queue.
+  }
 }
 
 // ---------------------------------------------------------------------------
