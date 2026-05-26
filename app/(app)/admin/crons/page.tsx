@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { db, schema } from "@/lib/db/client";
 import { hasPermission } from "@/lib/rbac";
 import { PageHelp } from "../../_components/PageHelp";
+import { ActionForm } from "../../_components/ActionForm";
 import { runCronNow } from "./_actions";
 
 export const dynamic = "force-dynamic";
@@ -101,15 +102,15 @@ export default async function AdminCronsPage() {
                 <span className="text-[11px] text-cg-n-500">
                   {humanCron(c.schedule)} · UTC
                 </span>
-                <form action={runCronNow} className="ml-auto">
-                  <input type="hidden" name="path" value={c.path} />
-                  <button
-                    type="submit"
-                    className="text-xs border border-cg-teal text-cg-teal rounded-input px-3 py-1 hover:bg-cg-teal hover:text-white"
-                  >
-                    Run now
-                  </button>
-                </form>
+                <div className="ml-auto">
+                  <ActionForm
+                    action={runCronNow}
+                    label="Run now"
+                    loadingLabel="Triggering…"
+                    variant="ghost"
+                    hiddenInputs={{ path: c.path }}
+                  />
+                </div>
               </header>
               {last ? (
                 <div className="px-4 py-3 text-sm">

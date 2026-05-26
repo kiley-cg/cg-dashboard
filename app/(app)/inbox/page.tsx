@@ -14,10 +14,12 @@ import {
   matchCsrByName,
 } from "@/lib/people/registry";
 import { PageHelp } from "../_components/PageHelp";
+import { ActionForm } from "../_components/ActionForm";
 import { getCustomerDisplayMap } from "@/lib/db/production-po";
 import { InboxRow } from "./_components/InboxRow";
 import { RefreshButton } from "./_components/RefreshButton";
 import { UserSwitcher } from "./_components/UserSwitcher";
+import { markAllHandled } from "./_actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Inbox · Color Graphics" };
@@ -157,7 +159,16 @@ export default async function InboxPage({ searchParams }: PageProps) {
             on-demand pull.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {openCount > 0 && (
+            <ActionForm
+              action={markAllHandled}
+              label={`Mark all ${openCount} handled`}
+              loadingLabel="Marking…"
+              variant="ghost"
+              hiddenInputs={{ recipientUserId: String(myUserId) }}
+            />
+          )}
           <RefreshButton />
           {canViewAll && (
             <UserSwitcher current={viewing.key} filter={filter} />

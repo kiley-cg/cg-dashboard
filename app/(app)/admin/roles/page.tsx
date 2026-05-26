@@ -6,12 +6,7 @@ import { db, schema } from "@/lib/db/client";
 import { hasPermission } from "@/lib/rbac";
 import { PageHelp } from "../../_components/PageHelp";
 import { ActionForm } from "../../_components/ActionForm";
-import {
-  createRole,
-  deleteRole,
-  migrateLegacyRoles,
-  reseedRoles,
-} from "./_actions";
+import { createRole, deleteRole, reseedRoles } from "./_actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Roles · Admin · Color Graphics" };
@@ -76,13 +71,7 @@ export default async function AdminRolesPage() {
             action={reseedRoles}
             label="Re-seed defaults"
             loadingLabel="Re-seeding…"
-            title="Add any missing default roles (admin/manager/csr/floor/viewer). Won't overwrite custom edits."
-          />
-          <ActionForm
-            action={migrateLegacyRoles}
-            label="Migrate legacy roles"
-            loadingLabel="Migrating…"
-            title="Map every user's legacy role text column to the matching RBAC role. Idempotent."
+            title="Add any missing default roles. Won't overwrite custom edits."
           />
           <PageHelp slug="admin.roles" title="Admin · Roles" />
         </div>

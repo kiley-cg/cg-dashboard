@@ -12,6 +12,7 @@ import {
   inviteUser,
   removeRoleFromUser,
 } from "./actions";
+import { InviteForm } from "./_components/InviteForm";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -93,30 +94,7 @@ export default async function AdminUsersPage() {
           They land on the right surface immediately when they sign in with
           Google.
         </p>
-        <form
-          action={inviteUser}
-          className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2"
-        >
-          <input
-            type="text"
-            name="name"
-            placeholder="Name (optional)"
-            className="border border-cg-n-300 rounded-input px-2 py-1 bg-white text-sm"
-          />
-          <input
-            type="email"
-            name="email"
-            required
-            placeholder="email@colorgraphicswa.com"
-            className="border border-cg-n-300 rounded-input px-2 py-1 bg-white text-sm"
-          />
-          <button
-            type="submit"
-            className="rounded-btn bg-cg-black text-white px-3 py-1 text-xs font-semibold hover:bg-cg-n-800 transition"
-          >
-            Invite
-          </button>
-        </form>
+        <InviteForm action={inviteUser} />
         <p className="text-[11px] text-cg-n-500 mt-2">
           After invite, assign one or more RBAC roles in the table below.
         </p>

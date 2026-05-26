@@ -23,11 +23,6 @@ export const users = pgTable("user", {
   email: text("email").unique(),
   emailVerified: timestamp("emailVerified", { mode: "date" }),
   image: text("image"),
-  // App role. Drives access to role-specific surfaces (e.g. /production is
-  // for "production"; managers are a superset and always pass). Text rather
-  // than pg-enum so new roles can be added without a migration.
-  // Set via /admin/users; null until an admin assigns one.
-  role: text("role"),
 });
 
 export const accounts = pgTable(
