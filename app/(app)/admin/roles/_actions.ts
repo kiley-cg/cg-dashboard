@@ -106,10 +106,20 @@ export async function setRolePermissions(formData: FormData): Promise<void> {
   revalidatePath(`/admin/roles/${id}`);
 }
 
-export async function reseedRoles(): Promise<void> {
+// Returns a status string so the UI can render concrete confirmation
+// next to the button. useActionState-compatible: takes the previous
+// state as the first arg (unused but required) and returns the new
+// state string.
+export async function reseedRoles(
+  _prevState: string | null,
+): Promise<string> {
   await requireManager();
-  await seedRbac();
+  const result = await seedRbac();
   revalidatePath("/admin/roles");
+  if (result.rolesUpserted === 0) {
+    return "All default roles already present. Nothing to add.";
+  }
+  return `Added ${result.rolesUpserted} role${result.rolesUpserted === 1 ? "" : "s"} (${result.permissionsGranted} permission grants).`;
 }
 
 // One-shot migration: read every user's legacy `users.role` text column
@@ -123,7 +133,9 @@ export async function reseedRoles(): Promise<void> {
 //   sales            → csr      (no first-class sales role yet)
 //   sales_assistant  → viewer
 //   manager          → manager
-export async function migrateLegacyRoles(): Promise<void> {
+export async function migrateLegacyRoles(
+  _prevState: string | null,
+): Promise<string> {
   await requireManager();
   const { users } = await import("@/lib/db/schema");
   const all = await db
@@ -138,9 +150,14 @@ export async function migrateLegacyRoles(): Promise<void> {
     manager: "manager",
   };
 
+  let mapped = 0;
+  let skippedNoRole = 0;
   for (const u of all) {
     const target = u.role ? roleMap[u.role] : null;
-    if (!target) continue;
+    if (!target) {
+      if (!u.role) skippedNoRole++;
+      continue;
+    }
     const found = await db
       .select({ id: schema.roles.id })
       .from(schema.roles)
@@ -151,6 +168,11 @@ export async function migrateLegacyRoles(): Promise<void> {
       .insert(schema.userRoles)
       .values({ userId: u.id, roleId: found[0].id })
       .onConflictDoNothing();
+    mapped++;
   }
   revalidatePath("/admin/users");
+  if (mapped === 0) {
+    return `No legacy roles to migrate (${skippedNoRole} user${skippedNoRole === 1 ? "" : "s"} had no legacy role).`;
+  }
+  return `Mapped ${mapped} user${mapped === 1 ? "" : "s"} to an RBAC role (existing assignments preserved).`;
 }
