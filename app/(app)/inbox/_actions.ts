@@ -129,3 +129,74 @@ export async function replyToEntry(
   if (result.ok) return { ok: true };
   return { ok: false, error: result.error };
 }
+
+/**
+ * Mark every currently-open inbox entry for the viewing user as handled
+ * in one shot. Useful for end-of-day cleanup or after batch-replying
+ * to a stack of similar questions.
+ *
+ * Returns a status string for the ActionForm chip.
+ */
+export async function markAllHandled(
+  _prevState: string | null,
+  formData: FormData,
+): Promise<string> {
+  const { userId } = await authorize();
+  // Determine which user we're handling for — managers can pass a
+  // ?user=<key> override, regular users handle their own.
+  const overrideUserId = Number(formData.get("recipientUserId") ?? 0);
+  if (!overrideUserId) return "No recipient user ID";
+
+  // Find every open entry addressed to this recipient (i.e. has them
+  // in recipient_user_ids AND no handled_at row yet).
+  const { and, eq, isNull, sql } = await import("drizzle-orm");
+  const rows = await db
+    .select({ syncoreEntryId: schema.trackerEntriesCache.syncoreEntryId })
+    .from(schema.trackerEntriesCache)
+    .leftJoin(
+      schema.trackerInboxState,
+      and(
+        eq(
+          schema.trackerInboxState.syncoreEntryId,
+          schema.trackerEntriesCache.syncoreEntryId,
+        ),
+        eq(schema.trackerInboxState.recipientUserId, overrideUserId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.trackerEntriesCache.entryType, 3),
+        sql`${schema.trackerEntriesCache.recipientUserIds} @> ${JSON.stringify([overrideUserId])}::jsonb`,
+        isNull(schema.trackerInboxState.handledAt),
+      ),
+    );
+
+  if (rows.length === 0) {
+    return "No open messages to handle.";
+  }
+
+  const now = new Date();
+  await db
+    .insert(schema.trackerInboxState)
+    .values(
+      rows.map((r) => ({
+        syncoreEntryId: r.syncoreEntryId,
+        recipientUserId: overrideUserId,
+        handledAt: now,
+        handledByUserId: userId,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [
+        schema.trackerInboxState.syncoreEntryId,
+        schema.trackerInboxState.recipientUserId,
+      ],
+      set: {
+        handledAt: now,
+        handledByUserId: userId,
+      },
+    });
+
+  revalidatePath("/inbox");
+  return `Marked ${rows.length} message${rows.length === 1 ? "" : "s"} handled.`;
+}

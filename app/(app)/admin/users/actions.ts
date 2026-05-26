@@ -6,25 +6,28 @@ import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import { isManager } from "@/lib/managers";
 
-export async function inviteUser(formData: FormData): Promise<void> {
+export async function inviteUser(
+  _prevState: string | null,
+  formData: FormData,
+): Promise<string> {
   const session = await auth();
   if (!isManager(session?.user?.email)) {
-    throw new Error("Not authorized");
+    return "Not authorized";
   }
 
   const rawEmail = formData.get("email");
   const rawName = formData.get("name");
   if (typeof rawEmail !== "string" || !rawEmail.trim()) {
-    throw new Error("Email is required");
+    return "Email is required";
   }
 
   const email = rawEmail.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error(`Invalid email: ${email}`);
+    return `Invalid email: ${email}`;
   }
   const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN?.toLowerCase();
   if (allowedDomain && !email.endsWith(`@${allowedDomain}`)) {
-    throw new Error(`Email must be @${allowedDomain}`);
+    return `Email must be @${allowedDomain}`;
   }
 
   const name =
@@ -33,8 +36,16 @@ export async function inviteUser(formData: FormData): Promise<void> {
   // Pre-create a row so RBAC roles can be assigned before first sign-in.
   // Idempotent — if the user already exists, we don't touch them; admin
   // assigns roles via the table below.
-  await db.insert(users).values({ email, name }).onConflictDoNothing();
+  const result = await db
+    .insert(users)
+    .values({ email, name })
+    .onConflictDoNothing()
+    .returning({ id: users.id });
   revalidatePath("/admin/users");
+  if (result.length === 0) {
+    return `${email} already exists.`;
+  }
+  return `Invited ${email}. Assign roles below.`;
 }
 
 // RBAC: assign one role to a user. Idempotent — ON CONFLICT DO NOTHING.

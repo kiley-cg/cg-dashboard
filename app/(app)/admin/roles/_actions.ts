@@ -122,57 +122,5 @@ export async function reseedRoles(
   return `Added ${result.rolesUpserted} role${result.rolesUpserted === 1 ? "" : "s"} (${result.permissionsGranted} permission grants).`;
 }
 
-// One-shot migration: read every user's legacy `users.role` text column
-// and assign the matching RBAC role. Idempotent — re-runs do nothing
-// once everyone's been mapped. Safe to call from /admin/roles after a
-// fresh seed.
-//
-// Map:
-//   production       → production_floor
-//   csr              → csr
-//   sales            → csr      (no first-class sales role yet)
-//   sales_assistant  → viewer
-//   manager          → manager
-export async function migrateLegacyRoles(
-  _prevState: string | null,
-): Promise<string> {
-  await requireManager();
-  const { users } = await import("@/lib/db/schema");
-  const all = await db
-    .select({ id: users.id, role: users.role })
-    .from(users);
-
-  const roleMap: Record<string, string> = {
-    production: "production_floor",
-    csr: "csr",
-    sales: "csr",
-    sales_assistant: "viewer",
-    manager: "manager",
-  };
-
-  let mapped = 0;
-  let skippedNoRole = 0;
-  for (const u of all) {
-    const target = u.role ? roleMap[u.role] : null;
-    if (!target) {
-      if (!u.role) skippedNoRole++;
-      continue;
-    }
-    const found = await db
-      .select({ id: schema.roles.id })
-      .from(schema.roles)
-      .where(eq(schema.roles.name, target))
-      .limit(1);
-    if (found.length === 0) continue;
-    await db
-      .insert(schema.userRoles)
-      .values({ userId: u.id, roleId: found[0].id })
-      .onConflictDoNothing();
-    mapped++;
-  }
-  revalidatePath("/admin/users");
-  if (mapped === 0) {
-    return `No legacy roles to migrate (${skippedNoRole} user${skippedNoRole === 1 ? "" : "s"} had no legacy role).`;
-  }
-  return `Mapped ${mapped} user${mapped === 1 ? "" : "s"} to an RBAC role (existing assignments preserved).`;
-}
+// migrateLegacyRoles removed: users.role column dropped in
+// drizzle/0012 — RBAC is the single source of truth now.

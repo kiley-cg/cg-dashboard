@@ -187,9 +187,9 @@ Re-seed by clicking **Re-seed defaults** at the top. Idempotent — won't overwr
 
 Click any role label to open its edit page. Tick the permission checkboxes you want, hit **Save permissions**. System roles (Administrator, Manager, Viewer) can have their permissions edited but can't be deleted.
 
-## Migrate legacy roles
+## Past migration note
 
-If users still have the old single-text \`users.role\` column set, the **Migrate legacy roles** button maps each to the matching RBAC role (idempotent). One-time use during transition.
+The original single \`users.role\` text column was migrated to RBAC and the column dropped 2026-05-26. RBAC is the only source of truth now.
 
 ## Adding new permissions
 
