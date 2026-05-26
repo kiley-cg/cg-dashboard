@@ -1,10 +1,12 @@
 "use client";
 
-// Phase B "Ask about this Job" composer. Mounted on each PoCard;
-// clicking opens an inline popover with a recipient select (defaulted
-// to the job's CSR when known), a message textarea, and Send/Cancel.
-// On Send, calls askAboutJobAction which posts the message to the
-// Job's Syncore Job Log via pushFloorMessageToJobLog.
+// Phase B "Send Job Tracker" composer (originally "Ask about this Job"
+// — renamed per Kiley to match Syncore's native terminology). Mounted
+// on each PoCard; clicking opens an inline popover with a recipient
+// select (defaulted to the job's CSR when known), a message textarea,
+// and Send/Cancel. On Send, calls askAboutJobAction which routes to
+// SendTrackerAsync (email-the-recipient) when the recipient's Syncore
+// user ID is known, else falls back to a silent Job Log entry.
 
 import { useState, useTransition } from "react";
 import { askAboutJobAction } from "../_actions";
@@ -34,9 +36,9 @@ export function AskAboutJobButton({ jobId, csrName }: Props) {
         type="button"
         onClick={() => setOpen(true)}
         className="text-[11px] border border-cg-teal text-cg-teal font-semibold rounded px-2 py-0.5 hover:bg-cg-teal hover:text-white transition"
-        title="Send a question about this job to a CSR or salesperson"
+        title="Post a Job Tracker entry — emails the recipient via Syncore"
       >
-        Ask about this Job
+        Send Job Tracker
       </button>
       {open && (
         <Composer

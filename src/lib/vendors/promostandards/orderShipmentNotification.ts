@@ -142,8 +142,16 @@ function mapPackage(node: unknown): OsnShipmentPackage | null {
   // SanMar returns BOTH carrier: "UPS" AND shipmentMethod: "Ground" —
   // we want the carrier (UPS), not the service level (Ground), in the
   // tracking-card "Carrier" column. Check carrier-named fields first.
-  const carrier =
+  let carrier =
     findStr(obj, ["carrier", "Carrier", "shipmentMethod", "ShipmentMethod"]) ?? null;
+  // Carrier normalization. C&B returns "CI" (internal courier code) for
+  // some shipments even though the tracking# starts with 1Z = UPS.
+  // The UPS Track cron filters on lower(carrier) = 'ups', so without
+  // this coercion those rows get skipped and never get ETAs. Only
+  // coerce when the tracking# format is unambiguously UPS.
+  if (tracking.startsWith("1Z") && carrier?.toUpperCase() !== "UPS") {
+    carrier = "UPS";
+  }
   const shipDate =
     findStr(obj, [
       "shipmentDate",
