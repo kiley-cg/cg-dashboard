@@ -4,7 +4,9 @@
 //
 // Usage:
 //   curl -s -H "x-cron-secret: $CRON_SECRET" \
-//     "https://inventory-check-neon.vercel.app/api/admin/proof-probe?fileId=<DRIVE_FILE_ID>" | jq
+//     "https://inventory-check-neon.vercel.app/api/cron/proof-probe?fileId=<DRIVE_FILE_ID>" | jq
+//
+// Under /api/cron/* so x-cron-secret bypasses the auth middleware.
 
 import { NextResponse } from "next/server";
 import { downloadProofBytes } from "@/lib/drive/proofs";
