@@ -123,11 +123,11 @@ async function upsertOne(
     modifiedAt: p.modifiedAt,
     extracted: extracted
       ? {
-          // Bonus embroidery fields — surfaced here for the upcoming
-          // Production Worksheet matrix (D2.C).
           decoration: extracted.decoration,
           stitches: extracted.stitches,
           jobIdFromText: extracted.jobIdFromText,
+          salespersonInitials: extracted.salespersonInitials,
+          imprintLocations: extracted.imprintLocations,
           matchedSnippets: extracted.matchedSnippets,
         }
       : undefined,
@@ -136,7 +136,9 @@ async function upsertOne(
   const fields = {
     imprintLocation: extracted?.imprintLocation ?? null,
     qtyGarments: extracted?.qtyGarments ?? null,
-    approvedBy: extracted?.approvedBy ?? null,
+    // approvedBy is never auto-populated from the PDF — user enters
+    // via the Verification Record form on /jobs/[id].
+    approvedBy: null,
   };
 
   if (existing.length > 0) {
