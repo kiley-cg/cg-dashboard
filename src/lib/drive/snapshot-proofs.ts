@@ -33,15 +33,22 @@ export async function snapshotProofs(opts?: {
   // Override the configured root folder. Used for range-folder backfills
   // (e.g. "30000-30999") so one Vercel call covers a bounded chunk.
   rootFolderId?: string;
+  // Cap on PDFs processed per call. Lets a backfill chunk a large range
+  // into multiple Vercel invocations (each capped at 300s).
+  limit?: number;
+  // How many PDFs to download+parse in parallel. PDF parsing on Vercel
+  // is mostly I/O-bound (Drive download), so 4 is a reasonable default.
+  concurrency?: number;
 }): Promise<SnapshotResult[]> {
-  const proofs = await listProofs({
+  const allProofs = await listProofs({
     modifiedAfter: opts?.modifiedAfter,
     rootFolderId: opts?.rootFolderId,
   });
+  const proofs = opts?.limit ? allProofs.slice(0, opts.limit) : allProofs;
   const parseSpec = opts?.parseSpec ?? true;
+  const concurrency = Math.max(1, opts?.concurrency ?? 4);
 
-  const results: SnapshotResult[] = [];
-  for (const p of proofs) {
+  async function processOne(p: typeof proofs[number]): Promise<SnapshotResult> {
     let extracted: ProofSpec | undefined;
     if (parseSpec) {
       try {
@@ -59,28 +66,37 @@ export async function snapshotProofs(opts?: {
     const effectiveJobId = p.jobId ?? extracted?.jobIdFromText ?? null;
 
     if (!effectiveJobId) {
-      results.push({
+      return {
         fileId: p.fileId,
         filename: p.filename,
         jobId: null,
         outcome: "skipped",
         reason: "no job# in filename OR PDF body",
         extracted,
-      });
-      continue;
+      };
     }
 
     const outcome = await upsertOne(
       { ...p, jobId: effectiveJobId },
       extracted,
     );
-    results.push({
+    return {
       fileId: p.fileId,
       filename: p.filename,
       jobId: effectiveJobId,
       outcome,
       extracted,
-    });
+    };
+  }
+
+  // Bounded-concurrency map: process up to `concurrency` PDFs in
+  // parallel. With parseSpec=false there's no PDF download so the
+  // concurrency only affects DB upserts — harmless either way.
+  const results: SnapshotResult[] = [];
+  for (let i = 0; i < proofs.length; i += concurrency) {
+    const batch = proofs.slice(i, i + concurrency);
+    const batchResults = await Promise.all(batch.map(processOne));
+    results.push(...batchResults);
   }
   return results;
 }
