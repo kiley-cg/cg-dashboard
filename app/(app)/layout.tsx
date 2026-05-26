@@ -30,6 +30,11 @@ export default async function AppLayout({
     userId: session?.user?.id,
     permission: "inbox.view",
   });
+  const showVerifications = await hasPermission({
+    email: session?.user?.email,
+    userId: session?.user?.id,
+    permission: "inventory.view",
+  });
   // Inbox "open" count for the nav badge. Only meaningful for users
   // who are mapped to a Syncore userId in the registry.
   //
@@ -132,6 +137,14 @@ export default async function AppLayout({
                     {inboxOpenCount}
                   </span>
                 )}
+              </Link>
+            )}
+            {showVerifications && (
+              <Link
+                href="/verifications"
+                className="text-cg-n-300 hover:text-white transition"
+              >
+                Verifications
               </Link>
             )}
             {showAdmin && (

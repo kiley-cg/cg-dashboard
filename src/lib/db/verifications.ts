@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "./client";
 import type { FlatLineItem } from "@/lib/syncore/types";
 import type { InventoryLookup } from "@/lib/vendors/types";
@@ -171,4 +171,70 @@ export async function autoVerifyClean(args: {
   }
 
   return result;
+}
+
+// --- Phase D1: job-keyed verification look-back -------------------------
+// Reads + writes for the job_verification_record table. Manual entry today;
+// proofs auto-population layers in via Phase D2 with source="proof".
+
+export type JobVerificationRecord =
+  typeof schema.jobVerificationRecord.$inferSelect;
+
+/**
+ * All records for a job (manual + proof), newest first. Used by the
+ * /jobs/[id] Verification Record section to show current spec + any
+ * earlier auto-captured proofs.
+ */
+export async function findJobVerificationRecords(
+  jobId: string,
+): Promise<JobVerificationRecord[]> {
+  return await db
+    .select()
+    .from(schema.jobVerificationRecord)
+    .where(eq(schema.jobVerificationRecord.syncoreJobId, jobId))
+    .orderBy(desc(schema.jobVerificationRecord.capturedAt));
+}
+
+/**
+ * Upsert the MANUAL row for a job. Schema permits multiple records per
+ * job (so D2 proof captures can each have their own row), but for the
+ * D1 manual-entry form we want exactly one "current spec" per job —
+ * editing replaces. Idempotent.
+ */
+export async function upsertManualJobVerificationRecord(args: {
+  jobId: string;
+  imprintLocation: string | null;
+  qtyGarments: number | null;
+  approvedBy: string | null;
+}): Promise<void> {
+  const existing = await db
+    .select({ id: schema.jobVerificationRecord.id })
+    .from(schema.jobVerificationRecord)
+    .where(
+      and(
+        eq(schema.jobVerificationRecord.syncoreJobId, args.jobId),
+        eq(schema.jobVerificationRecord.source, "manual"),
+      ),
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    await db
+      .update(schema.jobVerificationRecord)
+      .set({
+        imprintLocation: args.imprintLocation,
+        qtyGarments: args.qtyGarments,
+        approvedBy: args.approvedBy,
+        capturedAt: new Date(),
+      })
+      .where(eq(schema.jobVerificationRecord.id, existing[0].id));
+  } else {
+    await db.insert(schema.jobVerificationRecord).values({
+      syncoreJobId: args.jobId,
+      imprintLocation: args.imprintLocation,
+      qtyGarments: args.qtyGarments,
+      approvedBy: args.approvedBy,
+      source: "manual",
+    });
+  }
 }
