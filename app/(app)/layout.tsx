@@ -32,6 +32,12 @@ export default async function AppLayout({
   });
   // Inbox "open" count for the nav badge. Only meaningful for users
   // who are mapped to a Syncore userId in the registry.
+  //
+  // Wrapped in try/catch because this query touches the Phase C inbox
+  // tables — if the migration (drizzle/0011_brief_skin.sql) hasn't run
+  // yet on this environment, we don't want the layout to throw and
+  // crash every page in the app. Worst case the badge silently reads
+  // 0 until migrations land.
   let inboxOpenCount = 0;
   if (showInbox) {
     const me =
@@ -39,30 +45,35 @@ export default async function AppLayout({
       ROUTABLE_PEOPLE.find((p) => p.displayName === session?.user?.name) ??
       null;
     if (me?.syncoreUserId) {
-      const rows = await db
-        .select({ n: sql<number>`COUNT(*)::int` })
-        .from(schema.trackerEntriesCache)
-        .leftJoin(
-          schema.trackerInboxState,
-          and(
-            eq(
-              schema.trackerInboxState.syncoreEntryId,
-              schema.trackerEntriesCache.syncoreEntryId,
+      try {
+        const rows = await db
+          .select({ n: sql<number>`COUNT(*)::int` })
+          .from(schema.trackerEntriesCache)
+          .leftJoin(
+            schema.trackerInboxState,
+            and(
+              eq(
+                schema.trackerInboxState.syncoreEntryId,
+                schema.trackerEntriesCache.syncoreEntryId,
+              ),
+              eq(
+                schema.trackerInboxState.recipientUserId,
+                me.syncoreUserId,
+              ),
             ),
-            eq(
-              schema.trackerInboxState.recipientUserId,
-              me.syncoreUserId,
+          )
+          .where(
+            and(
+              eq(schema.trackerEntriesCache.entryType, 3),
+              sql`${schema.trackerEntriesCache.recipientUserIds} @> ${JSON.stringify([me.syncoreUserId])}::jsonb`,
+              isNull(schema.trackerInboxState.handledAt),
             ),
-          ),
-        )
-        .where(
-          and(
-            eq(schema.trackerEntriesCache.entryType, 3),
-            sql`${schema.trackerEntriesCache.recipientUserIds} @> ${JSON.stringify([me.syncoreUserId])}::jsonb`,
-            isNull(schema.trackerInboxState.handledAt),
-          ),
-        );
-      inboxOpenCount = rows[0]?.n ?? 0;
+          );
+        inboxOpenCount = rows[0]?.n ?? 0;
+      } catch {
+        // Tables likely not migrated yet — keep the layout alive.
+        inboxOpenCount = 0;
+      }
     }
   }
   // Admin nav appears when the user can manage any admin surface.
