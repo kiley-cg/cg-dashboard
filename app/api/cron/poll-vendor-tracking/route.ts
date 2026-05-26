@@ -16,12 +16,13 @@
 
 import { NextResponse } from "next/server";
 import { logCronRun } from "@/lib/cron/log";
-import { and, desc, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { addTrackingIfMissing } from "@/lib/db/receiving";
 import { fetchVendorTracking } from "@/lib/vendors/tracking";
 import { APPAREL_SUPPLIER_IDS } from "@/lib/syncore/production";
 import { pushPoTrackingToJobLog } from "@/lib/syncore/job-tracker-push";
+import { fetchUpsTracking } from "@/lib/ups/tracking";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -135,13 +136,43 @@ async function handler(req: Request): Promise<NextResponse> {
 
       let added = 0;
       for (const s of shipments) {
+        const carrier = s.carrier ?? "Unknown";
         const inserted = await addTrackingIfMissing({
           poId: po.poId,
-          carrier: s.carrier ?? "Unknown",
+          carrier,
           trackingNumber: s.trackingNumber,
           source: "api",
         });
-        if (inserted) added++;
+        if (!inserted) continue;
+        added++;
+        // Synchronous UPS Track call on newly-inserted UPS rows so the
+        // Job Log push below can include ETA / delivery status inline.
+        // Skips non-UPS carriers; failures here are non-fatal (the
+        // 4-hourly poll-carriers cron will fill these in later).
+        if (carrier.toUpperCase() === "UPS" && s.trackingNumber.startsWith("1Z")) {
+          try {
+            const t = await fetchUpsTracking(s.trackingNumber);
+            const eta = t.actualDeliveryDate ?? t.scheduledDeliveryDate ?? null;
+            const status =
+              t.statusDescription ?? (t.statusCode ? `code:${t.statusCode}` : null);
+            await db
+              .update(schema.poTracking)
+              .set({
+                eta,
+                status,
+                lastPolledAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(schema.poTracking.poId, po.poId),
+                  eq(schema.poTracking.trackingNumber, s.trackingNumber),
+                ),
+              );
+          } catch {
+            // UPS hiccup — fine, poll-carriers will retry.
+          }
+        }
       }
 
       let jobLogSynced = false;
