@@ -5,7 +5,10 @@
 //
 // Usage:
 //   curl -s -H "x-cron-secret: $CRON_SECRET" \
-//     "https://inventory-check-neon.vercel.app/api/admin/drive-probe" | jq
+//     "https://inventory-check-neon.vercel.app/api/cron/drive-probe" | jq
+//
+// Lives under /api/cron/* so the middleware's CRON_SECRET carve-out
+// applies — /api/admin/* would require a signed-in session.
 
 import { NextResponse } from "next/server";
 import { getDriveClient, getProofsFolderId } from "@/lib/drive/client";
