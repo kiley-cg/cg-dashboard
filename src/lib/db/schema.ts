@@ -10,6 +10,7 @@ import {
   boolean,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
 
 // Auth.js standard tables
@@ -491,4 +492,51 @@ export const helpDocs = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
     updatedByUserId: text("updated_by_user_id").references(() => users.id),
   },
+);
+
+// --- Phase C inbox / tracker mirror -------------------------------------
+//
+// Local cache of Syncore Job Tracker entries. Snapshot cron fetches per
+// active job every 30 min; manual /inbox refresh fires the same path
+// on-demand. The inbox page reads from these tables, never from
+// Syncore live — keeps the page snappy and consolidates per-user
+// "what's addressed to me" without a Syncore endpoint that supports it.
+
+export const trackerEntriesCache = pgTable(
+  "tracker_entries_cache",
+  {
+    syncoreEntryId: text("syncore_entry_id").primaryKey(), // stored as text for safety (Syncore IDs are big ints)
+    jobId: text("job_id").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    createdByUserId: integer("created_by_user_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+    description: text("description").notNull(),
+    entryType: integer("entry_type").notNull(), // 2 = system, 3 = note
+    colorId: integer("color_id").notNull(),
+    // User IDs derived from the immediately-following entryType=2 "email
+    // sent to…" auto-row. Many entries have 0 recipients; the GIN index
+    // makes "where 13379 = ANY(recipient_user_ids)" fast.
+    recipientUserIds: jsonb("recipient_user_ids").notNull().default(sql`'[]'::jsonb`),
+    fetchedAt: timestamp("fetched_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    idxJob: index("tracker_entries_cache_job_idx").on(t.jobId),
+    idxCreated: index("tracker_entries_cache_created_idx").on(t.createdAt),
+  }),
+);
+
+// Per-recipient "I handled this" flag. Composite PK so a multi-recipient
+// entry tracks each person's handled state independently.
+export const trackerInboxState = pgTable(
+  "tracker_inbox_state",
+  {
+    syncoreEntryId: text("syncore_entry_id").notNull(),
+    recipientUserId: integer("recipient_user_id").notNull(),
+    handledAt: timestamp("handled_at", { mode: "date" }),
+    handledByUserId: text("handled_by_user_id").references(() => users.id),
+    notes: text("notes"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.syncoreEntryId, t.recipientUserId] }),
+  }),
 );
