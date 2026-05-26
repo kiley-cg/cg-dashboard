@@ -228,6 +228,29 @@ All 5 current crons log to \`cron_runs\`:
 `,
   },
   {
+    slug: "verifications",
+    title: "Verification look-back",
+    bodyMd: `# Verification look-back
+
+Pull up a job's verification trail without flipping pages. When a vendor sends the wrong garment or a customer questions an order, this is where you confirm imprint location, quantity, and who approved.
+
+## How to find a job
+
+- Type a **customer name** (partial OK) — search hits the latest Job Follow-Up snapshot's customer + description fields.
+- Or type a **job number** directly — jumps to that job.
+
+## What's on each job page
+
+When you open a result, the job page shows:
+- **Verification record** (top) — imprint location, qty garments, approved-by. Editable by anyone with the \`verifications.record_spec\` permission (CSRs, managers, admins). Saved values persist forever — you don't lose context when the job closes.
+- **Per-line inventory verifications** — every "Verify" click ever recorded for this job, with timestamps and who.
+
+## Phase D2 (coming)
+
+Christina's proofs (from Google Drive) will auto-populate the spec when she signs off — same fields, source flips to "proof" instead of "manual". The form here keeps working unchanged.
+`,
+  },
+  {
     slug: "inbox",
     title: "Inbox",
     bodyMd: `# Inbox

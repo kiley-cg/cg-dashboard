@@ -7,8 +7,11 @@ import type { FlatLineItem } from "@/lib/syncore/types";
 import {
   autoVerifyClean,
   findVerificationsForJob,
+  findJobVerificationRecords,
   isJobAutoVerifyDisabled,
 } from "@/lib/db/verifications";
+import { hasPermission } from "@/lib/rbac";
+import { JobSpecForm } from "./_components/JobSpecForm";
 import { pickConsolidationWarehouse } from "@/lib/vendors/warehouse-priority";
 import { matchVariant } from "@/lib/vendors/match";
 import { estimateFreight } from "@/lib/ups/freight";
@@ -66,6 +69,19 @@ export default async function JobPage({ params, searchParams }: Props) {
   const canQuoteFreight = !!(freightFromZip && freightToZip);
   const session = await auth();
   const userId = session?.user?.id;
+  // Phase D1: spec/approval row (read here so we can render the
+  // editable form alongside the inventory check).
+  const [jobSpecRecords, canEditSpec] = await Promise.all([
+    findJobVerificationRecords(id),
+    hasPermission({
+      email: session?.user?.email,
+      userId: session?.user?.id,
+      permission: "verifications.record_spec",
+    }),
+  ]);
+  // The manual row is the editable "current" spec; proof rows are
+  // future-D2 captures. Pick the most-recent manual row to seed the form.
+  const manualSpec = jobSpecRecords.find((r) => r.source === "manual") ?? null;
 
   let bundle;
   try {
@@ -228,6 +244,26 @@ export default async function JobPage({ params, searchParams }: Props) {
           )}
         </div>
         {job.status && <Badge tone="neutral">{job.status}</Badge>}
+      </div>
+
+      {/* Phase D1: per-job spec / approval record. Editable by users with
+          verifications.record_spec; everyone else sees a read-only view.
+          Future D2 will auto-populate from Christina's Drive proofs. */}
+      <div className="mb-6">
+        <JobSpecForm
+          jobId={id}
+          initial={
+            manualSpec
+              ? {
+                  imprintLocation: manualSpec.imprintLocation,
+                  qtyGarments: manualSpec.qtyGarments,
+                  approvedBy: manualSpec.approvedBy,
+                  capturedAt: manualSpec.capturedAt.toISOString(),
+                }
+              : null
+          }
+          canEdit={canEditSpec}
+        />
       </div>
 
       {(() => {

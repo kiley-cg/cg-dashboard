@@ -43,6 +43,7 @@ const SEED_ROLES: SeedRole[] = [
     permissions: [
       "inventory.view",
       "inventory.verify",
+      "verifications.record_spec",
       "production.view",
       "production.add_tracking",
       "inbox.view",

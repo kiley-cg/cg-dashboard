@@ -53,6 +53,10 @@ export const PERMISSIONS = {
     label: "Clear job verifications",
     description: "Reset all verifications for a job (escape hatch).",
   },
+  "verifications.record_spec": {
+    label: "Edit job spec record",
+    description: "Write the imprint location / qty / approved-by on a job's verification record.",
+  },
 
   // Manager dashboard (follow-ups digest etc.)
   "dashboard.view": {
