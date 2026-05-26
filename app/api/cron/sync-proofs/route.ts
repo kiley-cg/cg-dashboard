@@ -41,16 +41,21 @@ async function handler(req: Request): Promise<NextResponse> {
     d.setDate(d.getDate() - 30);
     modifiedAfter = d;
   }
+  // ?parseSpec=false → metadata-only sweep (no PDF download/parse).
+  // Useful as a fast connectivity probe when troubleshooting auth.
+  const parseSpecParam = url.searchParams.get("parseSpec");
+  const parseSpec = parseSpecParam === "false" ? false : true;
 
   const startedAt = Date.now();
   try {
-    const results = await snapshotProofs({ modifiedAfter });
+    const results = await snapshotProofs({ modifiedAfter, parseSpec });
     const summary = {
       proofCount: results.length,
       inserted: results.filter((r) => r.outcome === "inserted").length,
       updated: results.filter((r) => r.outcome === "updated").length,
       skipped: results.filter((r) => r.outcome === "skipped").length,
       modifiedAfter: modifiedAfter.toISOString(),
+      parseSpec,
       durationMs: Date.now() - startedAt,
     };
     return NextResponse.json({ ok: true, summary });
