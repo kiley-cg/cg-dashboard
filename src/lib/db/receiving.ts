@@ -86,11 +86,29 @@ export async function listInboundPos(
     trackingByPo.set(t.poId, arr);
   }
 
-  return pos.map((po) => ({
-    po,
-    receipt: receiptByPo.get(po.poId) ?? null,
-    tracking: trackingByPo.get(po.poId) ?? [],
-  }));
+  return pos
+    .map((po) => ({
+      po,
+      receipt: receiptByPo.get(po.poId) ?? null,
+      tracking: trackingByPo.get(po.poId) ?? [],
+    }))
+    // Drop POs that are effectively received from the Inbound view —
+    // tab shows "still en route" only. A PO is considered received when
+    //   - someone clicked Mark Received (receipt.receivedAt set), OR
+    //   - every tracking entry shows a delivered status.
+    // (The Syncore terminal-status filter above already covers the
+    // third path — accounting posts it later.)
+    .filter((v) => {
+      if (v.receipt?.receivedAt) return false;
+      const t = v.tracking;
+      const allDelivered =
+        t.length > 0 &&
+        t.every((row) =>
+          (row.status ?? "").toLowerCase().includes("delivered"),
+        );
+      if (allDelivered) return false;
+      return true;
+    });
 }
 
 export async function addTracking(args: {
