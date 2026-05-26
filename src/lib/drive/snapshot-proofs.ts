@@ -10,7 +10,8 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
-import { listProofs, type DriveProof } from "./proofs";
+import { downloadProofBytes, listProofs, type DriveProof } from "./proofs";
+import { extractProofSpec, type ProofSpec } from "./proof-extract";
 
 export interface SnapshotResult {
   fileId: string;
@@ -18,12 +19,20 @@ export interface SnapshotResult {
   jobId: string | null;
   outcome: "inserted" | "updated" | "skipped";
   reason?: string;
+  // D2.B: what we managed to extract from the PDF body. Null entries
+  // mean the regex didn't match — surface via the admin probe so we
+  // can tune patterns.
+  extracted?: ProofSpec;
 }
 
 export async function snapshotProofs(opts?: {
   modifiedAfter?: Date;
+  // D2.B: extract PDF text + parse spec fields. Defaults to true;
+  // pass false for a metadata-only sweep (faster, no Drive download).
+  parseSpec?: boolean;
 }): Promise<SnapshotResult[]> {
   const proofs = await listProofs({ modifiedAfter: opts?.modifiedAfter });
+  const parseSpec = opts?.parseSpec ?? true;
 
   const results: SnapshotResult[] = [];
   for (const p of proofs) {
@@ -37,18 +46,51 @@ export async function snapshotProofs(opts?: {
       });
       continue;
     }
-    const outcome = await upsertOne(p);
+
+    let extracted: ProofSpec | undefined;
+    if (parseSpec) {
+      try {
+        const bytes = await downloadProofBytes(p.fileId);
+        const text = await parsePdfText(bytes);
+        extracted = extractProofSpec(text);
+      } catch {
+        // PDF parse / download failure isn't fatal — write the stub row
+        // with file metadata; the admin probe can flag and re-parse.
+        extracted = undefined;
+      }
+    }
+
+    const outcome = await upsertOne(p, extracted);
     results.push({
       fileId: p.fileId,
       filename: p.filename,
       jobId: p.jobId,
       outcome,
+      extracted,
     });
   }
   return results;
 }
 
-async function upsertOne(p: DriveProof): Promise<"inserted" | "updated"> {
+// Lazy import so the cron route can tree-shake the parser out of the
+// bundle when parseSpec=false. pdf-parse pulls in a chunk of Node
+// internals that we don't need for the metadata-only path.
+// pdf-parse's ESM build exposes a named module; CJS exposes a function
+// at .default. Coerce through unknown to either shape and call.
+type PdfParseFn = (b: Buffer) => Promise<{ text?: string }>;
+async function parsePdfText(bytes: Buffer): Promise<string> {
+  const mod = (await import("pdf-parse")) as unknown as
+    | PdfParseFn
+    | { default: PdfParseFn };
+  const fn: PdfParseFn = typeof mod === "function" ? mod : mod.default;
+  const result = await fn(bytes);
+  return result.text ?? "";
+}
+
+async function upsertOne(
+  p: DriveProof,
+  extracted: ProofSpec | undefined,
+): Promise<"inserted" | "updated"> {
   // Look for an existing proof row for this job + fileId. We store
   // fileId inside `raw->>'fileId'` so each unique Drive file maps to
   // exactly one row.
@@ -72,14 +114,24 @@ async function upsertOne(p: DriveProof): Promise<"inserted" | "updated"> {
     parentFolderName: p.parentFolderName,
     webViewLink: p.webViewLink,
     modifiedAt: p.modifiedAt,
+    extracted: extracted
+      ? {
+          matchedSnippets: extracted.matchedSnippets,
+        }
+      : undefined,
+  };
+
+  const fields = {
+    imprintLocation: extracted?.imprintLocation ?? null,
+    qtyGarments: extracted?.qtyGarments ?? null,
+    approvedBy: extracted?.approvedBy ?? null,
   };
 
   if (existing.length > 0) {
     await db
       .update(schema.jobVerificationRecord)
       .set({
-        // D2.B will populate these from PDF text. For now they stay
-        // whatever they were on insert.
+        ...fields,
         capturedAt: new Date(),
         raw: raw as unknown as object,
       })
@@ -89,6 +141,7 @@ async function upsertOne(p: DriveProof): Promise<"inserted" | "updated"> {
   await db.insert(schema.jobVerificationRecord).values({
     syncoreJobId: p.jobId!,
     source: "proof",
+    ...fields,
     raw: raw as unknown as object,
   });
   return "inserted";

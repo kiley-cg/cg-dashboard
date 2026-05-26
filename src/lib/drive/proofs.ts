@@ -121,3 +121,17 @@ export async function listProofs(opts?: {
   );
   return out;
 }
+
+/**
+ * Download a Drive file's bytes given its fileId. Used by the PDF
+ * parser (D2.B) to fetch the proof body for text extraction.
+ */
+export async function downloadProofBytes(fileId: string): Promise<Buffer> {
+  const drive = getDriveClient();
+  const res = await drive.files.get(
+    { fileId, alt: "media", supportsAllDrives: true },
+    { responseType: "arraybuffer" },
+  );
+  // googleapis returns an ArrayBuffer when responseType is set.
+  return Buffer.from(res.data as ArrayBuffer);
+}
