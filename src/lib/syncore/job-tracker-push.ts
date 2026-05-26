@@ -47,8 +47,21 @@ export async function pushPoTrackingToJobLog(poId: string): Promise<PushResult> 
   const supplierTail = poRow.supplierName ? ` (${poRow.supplierName})` : "";
 
   const header = `Tracking — ${carrierText} — PO ${poLabel}${supplierTail}`;
+  // Per-row format: "  UPS: 1Z… · ETA MM-DD" (or "· delivered MM-DD"
+  // when status indicates delivered). ETA/status are populated by the
+  // UPS Track cron OR a synchronous on-insert UPS call (see the
+  // vendor-poll cron), so they may be present here when the vendor
+  // poll just added the row.
   const body = trackingEntries
-    .map((t) => `  ${t.carrier}: ${t.trackingNumber}`)
+    .map((t) => {
+      const delivered = (t.status ?? "").toLowerCase().includes("delivered");
+      const dateTail = t.eta
+        ? delivered
+          ? ` · delivered ${t.eta.slice(5)}`
+          : ` · ETA ${t.eta.slice(5)}`
+        : "";
+      return `  ${t.carrier}: ${t.trackingNumber}${dateTail}`;
+    })
     .join("\n");
   const description = `${header}\n${body}`;
 
