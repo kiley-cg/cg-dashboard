@@ -158,9 +158,13 @@ function extractInkColors(text: string): string[] {
     .filter((s) => s.length > 0 && s.length < 30 && /^[A-Z][A-Z\s\/&]*$/.test(s));
 }
 
-// "Product :\nColor :\nBaseball Stress\nReliever\nRoyal blue"
-// Labels and values are on separate lines (PDF spatial layout). Look
-// for the labels then take the next 1-2 non-label lines as values.
+// "Product :\nColor :\nBaseball Stress\nReliever\nRoyal blue\n32665\n32665HLM"
+//
+// Labels appear consecutively (PDF spatial layout puts the label
+// column above the value column). After "Color :", the value block is:
+//   product lines (1-2) → color line (1) → job#/salesperson stuff.
+// Stop reading at the first all-digits or digits-then-initials line —
+// that's the start of the job# footer.
 function extractProductAndColor(
   text: string,
 ): { product: string | null; color: string | null } {
@@ -169,16 +173,19 @@ function extractProductAndColor(
   const colorIdx = lines.findIndex((l) => /^Color\s*:/i.test(l));
   if (productIdx < 0 || colorIdx < 0) return { product: null, color: null };
 
-  // After "Product :" / "Color :" the next two lines tend to be
-  // product (1-2 lines, e.g. "Baseball Stress" / "Reliever") then the
-  // color. Heuristic: take up to 2 lines after Color: as product,
-  // last one as color. Tuned against the Baseball Stress Reliever proof.
-  const after = lines.slice(colorIdx + 1).filter((l) => l.length > 0);
-  if (after.length === 0) return { product: null, color: null };
-  if (after.length === 1) return { product: null, color: after[0] };
-  // Last line is color; everything before is the product name.
-  const color = after[after.length - 1];
-  const product = after.slice(0, -1).join(" ").trim();
+  const valueLines: string[] = [];
+  for (const line of lines.slice(colorIdx + 1)) {
+    if (line.length === 0) continue;
+    // First numeric line = start of the job#/salesperson footer.
+    if (/^\d{3,6}([A-Z]{2,3})?$/.test(line)) break;
+    valueLines.push(line);
+  }
+  if (valueLines.length === 0) return { product: null, color: null };
+  if (valueLines.length === 1) return { product: null, color: valueLines[0] };
+  // Last value-line is color; everything before is the product name
+  // (which may be wrapped across 1-2 lines).
+  const color = valueLines[valueLines.length - 1];
+  const product = valueLines.slice(0, -1).join(" ").trim();
   return { product, color };
 }
 
