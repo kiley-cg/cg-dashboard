@@ -40,7 +40,9 @@ export async function GET(req: Request) {
   }
   try {
     const bytes = await downloadProofBytes(fileId);
-    const mod = (await import("pdf-parse")) as unknown as
+    // Deep import: pdf-parse@1.1.1's index.js runs a self-test on
+    // load that crashes under Next.js's webpack bundler.
+    const mod = (await import("pdf-parse/lib/pdf-parse.js")) as unknown as
       | PdfParseFn
       | { default: PdfParseFn };
     const pdfParse: PdfParseFn = typeof mod === "function" ? mod : mod.default;
