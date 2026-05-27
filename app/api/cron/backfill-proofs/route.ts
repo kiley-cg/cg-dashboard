@@ -72,7 +72,7 @@ async function seedNewRangeFolders(): Promise<void> {
   }
 }
 
-export async function handler(req: Request): Promise<NextResponse> {
+async function handler(req: Request): Promise<NextResponse> {
   if (!authorize(req)) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
