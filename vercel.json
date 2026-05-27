@@ -35,7 +35,7 @@
     },
     {
       "path": "/api/cron/backfill-proofs",
-      "schedule": "30 13 * * *"
+      "schedule": "30 */4 * * *"
     }
   ]
 }
