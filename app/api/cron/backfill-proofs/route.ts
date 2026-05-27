@@ -81,9 +81,9 @@ async function handler(req: Request): Promise<NextResponse> {
   try {
     await seedNewRangeFolders();
 
-    // Pick the lowest-numbered range that isn't done. Sort the rows
-    // by an expression that pulls out the integer prefix so "1000-1999"
-    // sorts before "10000-10999".
+    // Pick the highest-numbered range that isn't done. Newest first
+    // because current production POs reference recent jobs — older
+    // ranges (100-999, 1000-1999) are archives and can wait.
     const candidates = await db
       .select()
       .from(schema.proofBackfillState)
@@ -96,7 +96,7 @@ async function handler(req: Request): Promise<NextResponse> {
       });
     }
     candidates.sort(
-      (a, b) => rangeLowerBound(a.rangeName) - rangeLowerBound(b.rangeName),
+      (a, b) => rangeLowerBound(b.rangeName) - rangeLowerBound(a.rangeName),
     );
     const target = candidates[0];
 
