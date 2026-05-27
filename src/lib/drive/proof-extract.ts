@@ -77,8 +77,10 @@ const LOCATION_HEADER_RX =
 // spaces/tabs only). Otherwise an ink color on the line above gets
 // concatenated with the location, e.g. "WHITE\nDefault" matched as
 // one. The dims may then appear concatenated or on the next line.
+// `\d*\.?\d+` (not `\d+\.?\d*`) so leading-decimal numbers like ".2"
+// match — promo dims sometimes look like ".2\"h".
 const PROMO_IMPRINT_RX =
-  /^(?!(?:Product|Color|Colors|Decoration|Ink|Proof|Art|Please|Inspect)\b)([A-Z][a-zA-Z]+(?:[ \t]+[A-Z][a-zA-Z]+){0,3})[ \t]*\n?[ \t]*(\d+(?:\.\d+)?["”'][wh]\s*x\s*\d+(?:\.\d+)?\s*["”'][wh])/gim;
+  /^(?!(?:Product|Color|Colors|Decoration|Ink|Proof|Art|Please|Inspect)\b)([A-Z][a-zA-Z]+(?:[ \t]+[A-Z][a-zA-Z]+){0,3})[ \t]*\n?[ \t]*(\d*\.?\d+["”'][wh]\s*x\s*\d*\.?\d+\s*["”'][wh])/gim;
 
 const QTY_PATTERNS: RegExp[] = [
   /(?:total\s+)?(?:quantity|qty)\s*[:\-]\s*(\d+)/i,
@@ -133,24 +135,17 @@ function extractLocations(text: string): {
     }
   }
 
-  // Second pass: promo product layout — "Default1.23\"w x 0.59\"h".
-  // Captures the dimensions snippet for separate storage too.
+  // Second pass: promo product layout — captures both the location
+  // name and the full dimensions string in one go.
   let dimensions: string | null = null;
   for (const m of text.matchAll(PROMO_IMPRINT_RX)) {
-    const norm = titleCase(m[1]).trim();
+    const norm = titleCase(m[1]).replace(/\s+/g, " ").trim();
     if (!seen.has(norm)) {
       seen.add(norm);
       out.push(norm);
     }
-    if (!dimensions) {
-      // Re-scan the same line to grab the full "1.2321"w x 0.5957"h"
-      // since PROMO_IMPRINT_RX only captures the start of dimensions.
-      const lineRx = new RegExp(
-        `${m[1]}\\s*(\\d+(?:\\.\\d+)?["”'][wh]\\s*x\\s*\\d+(?:\\.\\d+)?\\s*["”'][wh])`,
-        "i",
-      );
-      const dimMatch = text.match(lineRx);
-      dimensions = dimMatch ? dimMatch[1].replace(/\s+/g, " ").trim() : null;
+    if (!dimensions && m[2]) {
+      dimensions = m[2].replace(/\s+/g, " ").trim();
     }
   }
   if (out.length > 0) return { locations: out, dimensions };
