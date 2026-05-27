@@ -101,14 +101,13 @@ export async function snapshotProofs(opts?: {
   return results;
 }
 
-// Lazy import so the cron route can tree-shake the parser out of the
-// bundle when parseSpec=false. pdf-parse pulls in a chunk of Node
-// internals that we don't need for the metadata-only path.
-// pdf-parse's ESM build exposes a named module; CJS exposes a function
-// at .default. Coerce through unknown to either shape and call.
+// Deep import bypasses pdf-parse's index.js, which runs a self-test
+// reading ./test/data/05-versions-space.pdf on first load when
+// `module.parent` is falsy — true under Next.js's webpack bundler,
+// crashing every Vercel function with ENOENT.
 type PdfParseFn = (b: Buffer) => Promise<{ text?: string }>;
 async function parsePdfText(bytes: Buffer): Promise<string> {
-  const mod = (await import("pdf-parse")) as unknown as
+  const mod = (await import("pdf-parse/lib/pdf-parse.js")) as unknown as
     | PdfParseFn
     | { default: PdfParseFn };
   const fn: PdfParseFn = typeof mod === "function" ? mod : mod.default;
