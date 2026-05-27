@@ -149,6 +149,10 @@ async function upsertOne(
           jobIdFromText: extracted.jobIdFromText,
           salespersonInitials: extracted.salespersonInitials,
           imprintLocations: extracted.imprintLocations,
+          inkColors: extracted.inkColors,
+          imprintDimensions: extracted.imprintDimensions,
+          productName: extracted.productName,
+          productColor: extracted.productColor,
           matchedSnippets: extracted.matchedSnippets,
         }
       : undefined,
