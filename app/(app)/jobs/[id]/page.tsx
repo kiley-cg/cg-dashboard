@@ -12,6 +12,7 @@ import {
 } from "@/lib/db/verifications";
 import { hasPermission } from "@/lib/rbac";
 import { JobSpecForm } from "./_components/JobSpecForm";
+import { ProofRecordsCard } from "./_components/ProofRecordsCard";
 import { pickConsolidationWarehouse } from "@/lib/vendors/warehouse-priority";
 import { matchVariant } from "@/lib/vendors/match";
 import { estimateFreight } from "@/lib/ups/freight";
@@ -79,9 +80,11 @@ export default async function JobPage({ params, searchParams }: Props) {
       permission: "verifications.record_spec",
     }),
   ]);
-  // The manual row is the editable "current" spec; proof rows are
-  // future-D2 captures. Pick the most-recent manual row to seed the form.
+  // The manual row is the editable "current" spec; proof rows come from
+  // the Drive sync (D2). Show proofs in a separate card so the manual
+  // spec stays the editable source-of-truth.
   const manualSpec = jobSpecRecords.find((r) => r.source === "manual") ?? null;
+  const proofRecords = jobSpecRecords.filter((r) => r.source === "proof");
 
   let bundle;
   try {
@@ -248,8 +251,9 @@ export default async function JobPage({ params, searchParams }: Props) {
 
       {/* Phase D1: per-job spec / approval record. Editable by users with
           verifications.record_spec; everyone else sees a read-only view.
-          Future D2 will auto-populate from Christina's Drive proofs. */}
-      <div className="mb-6">
+          Drive proofs are surfaced separately below — kept distinct so the
+          manual row stays the editable source-of-truth. */}
+      <div className="mb-4">
         <JobSpecForm
           jobId={id}
           initial={
@@ -264,6 +268,10 @@ export default async function JobPage({ params, searchParams }: Props) {
           }
           canEdit={canEditSpec}
         />
+      </div>
+
+      <div className="mb-6">
+        <ProofRecordsCard proofs={proofRecords} />
       </div>
 
       {(() => {
