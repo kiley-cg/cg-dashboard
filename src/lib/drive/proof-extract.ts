@@ -64,11 +64,17 @@ const LOCATION_DIMENSIONED_RX =
 const LOCATION_HEADER_RX =
   /\b(LEFT\s+CHEST|RIGHT\s+CHEST|FULL\s+BACK|LEFT\s+SLEEVE|RIGHT\s+SLEEVE|HAT\s+FRONT|HAT\s+SIDE|BACK\s+YOKE|NAPE|LEFT\s+THIGH|RIGHT\s+THIGH)\b/gi;
 
-// Promo product imprint area marker. The location word is concatenated
-// with the dimensions, no space: "Default1.2321\"w x 0.5957 \"h".
-// Capture the dimensions string for downstream display.
+// Promo product imprint area marker. Three observed layouts:
+//   1. "Default1.2321\"w x 0.5957\"h"     (1 word + concatenated dims)
+//   2. "Case1.25\"w x .2\"h"               (1 word + concat)
+//   3. "Front  Center4\"w x 2.39\"h"       (multi-word + concat)
+//   4. "Front Panel Center\n5\"w x 1.5\"h" (multi-word, dims on next line)
+//
+// Permissive: 1-4 Title-Case words, then optional whitespace (incl.
+// newline), then dimensions. Negative lookahead skips known label
+// words so "Color :" / "Decoration : ..." don't false-match.
 const PROMO_IMPRINT_RX =
-  /\b(Default|Front|Back|Top|Bottom|Side|Lid|Handle|Strap)(\d+(?:\.\d+)?["”'][wh])/gi;
+  /^(?!(?:Product|Color|Colors|Decoration|Ink|Proof|Art|Please|Inspect)\b)([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,3})\s*\n?\s*(\d+(?:\.\d+)?["”'][wh]\s*x\s*\d+(?:\.\d+)?\s*["”'][wh])/gim;
 
 const QTY_PATTERNS: RegExp[] = [
   /(?:total\s+)?(?:quantity|qty)\s*[:\-]\s*(\d+)/i,
@@ -84,9 +90,16 @@ const STITCHES_RX = /\bSTITCHES\s+([0-9,]+)\b/i;
 const SALESPERSON_HEADER_RX = /\bPROOF\s+\d{4,6}\s+([A-Z]{2,3})\b/;
 const SALESPERSON_TRAILING_RX = /(\d{4,6})([A-Z]{2,3})\s*$/m;
 
-// "INK COLORS\nWHITE\n[next line]" — ink colors are listed one per line
-// after the header. We capture the first 1-3 lines of uppercase tokens.
-const INK_COLORS_RX = /\bINK\s+COLORS\s*\n((?:[A-Z][A-Z\s\/&]*\n){1,6})/i;
+// "INK COLORS" header (allow singular "INK COLOR" + multiple spaces).
+// Color values are scanned line-by-line after the header (see
+// extractInkColors) — some proofs interleave location/dimension lines
+// between the header and the actual color values.
+const INK_COLORS_HEADER_RX = /\bINK\s+COLORS?\b/i;
+// A color value line: 1-2 uppercase or Title-Case words, optionally
+// followed by a PMS code (digits). Examples: WHITE, White, BLACK,
+// "Royal Blue", "ROYAL 287", "CMYK PROCESS". Used to filter the lines
+// after the INK COLORS header.
+const INK_COLOR_VALUE_RX = /^([A-Z][A-Za-z]+(?:\s+(?:[A-Z][A-Za-z]+|\d{2,4}))?)\s*$/;
 
 function tryPatterns(text: string, patterns: RegExp[]): string | null {
   for (const p of patterns) {
@@ -150,12 +163,23 @@ function extractLocations(text: string): {
 }
 
 function extractInkColors(text: string): string[] {
-  const m = text.match(INK_COLORS_RX);
-  if (!m) return [];
-  return m[1]
-    .split(/\n/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s.length < 30 && /^[A-Z][A-Z\s\/&]*$/.test(s));
+  const lines = text.split("\n").map((l) => l.trim());
+  const headerIdx = lines.findIndex((l) => INK_COLORS_HEADER_RX.test(l));
+  if (headerIdx < 0) return [];
+
+  const colors: string[] = [];
+  for (const line of lines.slice(headerIdx + 1)) {
+    if (line.length === 0) continue;
+    // Stop at the next labelled section (Product:, Color:, etc.).
+    if (/^(?:Product|Color|Colors|Decoration)\s*:/i.test(line)) break;
+    // Skip lines that don't look like a color value (dimensions,
+    // interleaved location names, etc.).
+    if (!INK_COLOR_VALUE_RX.test(line)) continue;
+    colors.push(line);
+    // Heuristic cap — most proofs have <=6 ink colors.
+    if (colors.length >= 6) break;
+  }
+  return colors;
 }
 
 // "Product :\nColor :\nBaseball Stress\nReliever\nRoyal blue\n32665\n32665HLM"
@@ -170,7 +194,7 @@ function extractProductAndColor(
 ): { product: string | null; color: string | null } {
   const lines = text.split("\n").map((l) => l.trim());
   const productIdx = lines.findIndex((l) => /^Product\s*:/i.test(l));
-  const colorIdx = lines.findIndex((l) => /^Color\s*:/i.test(l));
+  const colorIdx = lines.findIndex((l) => /^Colors?\s*:/i.test(l));
   if (productIdx < 0 || colorIdx < 0) return { product: null, color: null };
 
   const valueLines: string[] = [];
