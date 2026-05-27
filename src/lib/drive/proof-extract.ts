@@ -73,8 +73,12 @@ const LOCATION_HEADER_RX =
 // Permissive: 1-4 Title-Case words, then optional whitespace (incl.
 // newline), then dimensions. Negative lookahead skips known label
 // words so "Color :" / "Decoration : ..." don't false-match.
+// Multi-word locations: words MUST be on the same line (separated by
+// spaces/tabs only). Otherwise an ink color on the line above gets
+// concatenated with the location, e.g. "WHITE\nDefault" matched as
+// one. The dims may then appear concatenated or on the next line.
 const PROMO_IMPRINT_RX =
-  /^(?!(?:Product|Color|Colors|Decoration|Ink|Proof|Art|Please|Inspect)\b)([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,3})\s*\n?\s*(\d+(?:\.\d+)?["”'][wh]\s*x\s*\d+(?:\.\d+)?\s*["”'][wh])/gim;
+  /^(?!(?:Product|Color|Colors|Decoration|Ink|Proof|Art|Please|Inspect)\b)([A-Z][a-zA-Z]+(?:[ \t]+[A-Z][a-zA-Z]+){0,3})[ \t]*\n?[ \t]*(\d+(?:\.\d+)?["”'][wh]\s*x\s*\d+(?:\.\d+)?\s*["”'][wh])/gim;
 
 const QTY_PATTERNS: RegExp[] = [
   /(?:total\s+)?(?:quantity|qty)\s*[:\-]\s*(\d+)/i,
