@@ -36,6 +36,9 @@ export async function snapshotProofs(opts?: {
   // Cap on PDFs processed per call. Lets a backfill chunk a large range
   // into multiple Vercel invocations (each capped at 300s).
   limit?: number;
+  // Skip the first N files (after newest-first sort). Pair with `limit`
+  // to step through a large range across multiple calls.
+  offset?: number;
   // How many PDFs to download+parse in parallel. PDF parsing on Vercel
   // is mostly I/O-bound (Drive download), so 4 is a reasonable default.
   concurrency?: number;
@@ -44,7 +47,10 @@ export async function snapshotProofs(opts?: {
     modifiedAfter: opts?.modifiedAfter,
     rootFolderId: opts?.rootFolderId,
   });
-  const proofs = opts?.limit ? allProofs.slice(0, opts.limit) : allProofs;
+  const offset = opts?.offset ?? 0;
+  const proofs = opts?.limit
+    ? allProofs.slice(offset, offset + opts.limit)
+    : allProofs.slice(offset);
   const parseSpec = opts?.parseSpec ?? true;
   const concurrency = Math.max(1, opts?.concurrency ?? 4);
 

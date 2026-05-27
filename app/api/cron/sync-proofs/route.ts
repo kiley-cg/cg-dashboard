@@ -52,6 +52,9 @@ async function handler(req: Request): Promise<NextResponse> {
   // ?limit=N → cap PDFs processed per call (chunk a large backfill).
   const limitParam = url.searchParams.get("limit");
   const limit = limitParam ? Number(limitParam) : undefined;
+  // ?offset=N → skip first N files. Pair with ?limit to step through.
+  const offsetParam = url.searchParams.get("offset");
+  const offset = offsetParam ? Number(offsetParam) : undefined;
   // ?concurrency=N → parallel PDF downloads. Default 4.
   const concurrencyParam = url.searchParams.get("concurrency");
   const concurrency = concurrencyParam ? Number(concurrencyParam) : undefined;
@@ -63,6 +66,7 @@ async function handler(req: Request): Promise<NextResponse> {
       parseSpec,
       rootFolderId,
       limit: Number.isFinite(limit) && limit! > 0 ? limit : undefined,
+      offset: Number.isFinite(offset) && offset! >= 0 ? offset : undefined,
       concurrency:
         Number.isFinite(concurrency) && concurrency! > 0 ? concurrency : undefined,
     });
@@ -75,6 +79,7 @@ async function handler(req: Request): Promise<NextResponse> {
       parseSpec,
       rootFolderId: rootFolderId ?? null,
       limit: limit ?? null,
+      offset: offset ?? null,
       concurrency: concurrency ?? null,
       durationMs: Date.now() - startedAt,
     };
