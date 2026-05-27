@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "./client";
 import type { FlatLineItem } from "@/lib/syncore/types";
 import type { InventoryLookup } from "@/lib/vendors/types";
@@ -193,6 +193,34 @@ export async function findJobVerificationRecords(
     .from(schema.jobVerificationRecord)
     .where(eq(schema.jobVerificationRecord.syncoreJobId, jobId))
     .orderBy(desc(schema.jobVerificationRecord.capturedAt));
+}
+
+/**
+ * Batched lookup for /production: returns a Map of jobId → proof rows.
+ * Only proof rows (source='proof') — manual rows aren't useful on the
+ * production tiles. Empty array when a job has no proofs.
+ */
+export async function findProofsByJobIds(
+  jobIds: string[],
+): Promise<Map<string, JobVerificationRecord[]>> {
+  const out = new Map<string, JobVerificationRecord[]>();
+  if (jobIds.length === 0) return out;
+  const rows = await db
+    .select()
+    .from(schema.jobVerificationRecord)
+    .where(
+      and(
+        inArray(schema.jobVerificationRecord.syncoreJobId, jobIds),
+        eq(schema.jobVerificationRecord.source, "proof"),
+      ),
+    )
+    .orderBy(desc(schema.jobVerificationRecord.capturedAt));
+  for (const r of rows) {
+    const list = out.get(r.syncoreJobId) ?? [];
+    list.push(r);
+    out.set(r.syncoreJobId, list);
+  }
+  return out;
 }
 
 /**

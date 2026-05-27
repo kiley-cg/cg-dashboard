@@ -10,6 +10,7 @@ import {
   listOpenDecorationPos,
   type DecorationPoView,
 } from "@/lib/db/production-po";
+import { findProofsByJobIds } from "@/lib/db/verifications";
 import {
   departmentForSupplier,
   type Department,
@@ -117,6 +118,10 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   // default recipient. Null when the job's never been on a follow-up
   // snapshot (the floor picks from the dropdown manually then).
   const csrMap = await getCsrMapByJobId({ jobIds });
+  // Drive proofs per job — the PoCard renders a small right-side panel
+  // with location / decoration / ink colors / Drive link so Kristen can
+  // confirm spec details without leaving the production view.
+  const proofsByJobId = await findProofsByJobIds(jobIds);
 
   // Bucket by scheduled date. Null scheduled_date = unscheduled. POs
   // scheduled to a week other than the displayed one don't render here —
@@ -353,6 +358,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                         customerMap.get(v.po.syncoreJobId) ?? null
                       }
                       csrName={csrMap.get(v.po.syncoreJobId) ?? null}
+                      proofs={proofsByJobId.get(v.po.syncoreJobId) ?? []}
                       weekDays={weekDayOptions}
                     />
                   )),
@@ -402,6 +408,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                             customerMap.get(v.po.syncoreJobId) ?? null
                           }
                           csrName={csrMap.get(v.po.syncoreJobId) ?? null}
+                          proofs={proofsByJobId.get(v.po.syncoreJobId) ?? []}
                           weekDays={weekDayOptions}
                         />
                       ))}

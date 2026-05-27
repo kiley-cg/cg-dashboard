@@ -12,6 +12,7 @@ import type {
   PoScheduleState,
 } from "@/lib/db/production-po";
 import type { TrackingEntry } from "@/lib/db/receiving";
+import type { JobVerificationRecord } from "@/lib/db/verifications";
 import type { Department } from "@/lib/syncore/production";
 import { ScheduleControl } from "./ScheduleControl";
 import { FloorStatusControl } from "./FloorStatusControl";
@@ -83,6 +84,10 @@ interface Props {
   // unknown. Powers the "Ask about this Job" composer's default
   // recipient — see AskAboutJobButton.
   csrName: string | null;
+  // Drive proof rows for this job (newest first). Empty when no proof
+  // has synced. Surfaces decoration spec / Drive link in a right-side
+  // panel so Kristen can confirm placement without leaving /production.
+  proofs: JobVerificationRecord[];
   weekDays: DayOption[]; // Mon-Fri of the displayed week
 }
 
@@ -97,6 +102,7 @@ export function PoCard({
   weekDays,
   customer,
   csrName,
+  proofs,
 }: Props) {
   const chip = DEPT_CHIP[department];
   const display = customer ?? shipToBusinessName(po) ?? `Job ${po.syncoreJobId}`;
@@ -204,7 +210,8 @@ export function PoCard({
       ].join(" ")}
     >
       <PoSelectCheckbox poId={po.poId} />
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 flex gap-3">
+        <div className="flex-1 min-w-0">
         {/* Identity row */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-bold text-base">{display}</span>
@@ -287,8 +294,87 @@ export function PoCard({
           poId={po.poId}
           initialNotes={state?.productionNotes ?? null}
         />
+        </div>
+        <ProofPanel proofs={proofs} />
       </div>
     </article>
+  );
+}
+
+// Right-side panel summarizing the proof spec(s) for this PO's job.
+// Compact by design — Kristen scans many cards; she wants location +
+// ink colors + click-through to the PDF, not a full data dump.
+type ProofRaw = {
+  fileId?: string;
+  filename?: string;
+  webViewLink?: string | null;
+  extracted?: {
+    decoration?: string | null;
+    salespersonInitials?: string | null;
+    productName?: string | null;
+    productColor?: string | null;
+    imprintLocations?: string[];
+    imprintDimensions?: string | null;
+    inkColors?: string[];
+  };
+};
+
+function ProofPanel({ proofs }: { proofs: JobVerificationRecord[] }) {
+  if (proofs.length === 0) {
+    return (
+      <div className="w-44 shrink-0 hidden sm:flex flex-col justify-center text-[11px] text-[#A8A296] italic px-2">
+        no proof in Drive
+      </div>
+    );
+  }
+  return (
+    <div className="w-56 shrink-0 hidden sm:flex flex-col gap-1.5 border-l border-[#E3DFD3] pl-3 text-[12px] text-[#3F3A30]">
+      <div className="text-[10px] font-bold tracking-wider text-[#6B6356] uppercase">
+        Proof{proofs.length > 1 ? ` · ${proofs.length}` : ""}
+      </div>
+      {proofs.slice(0, 3).map((p) => {
+        const raw = (p.raw ?? {}) as ProofRaw;
+        const ex = raw.extracted ?? {};
+        const location =
+          ex.imprintLocations && ex.imprintLocations.length > 0
+            ? ex.imprintLocations.join(", ")
+            : p.imprintLocation ?? null;
+        return (
+          <div key={p.id} className="leading-snug">
+            {ex.productName && (
+              <div className="font-medium text-[#3F3A30] truncate" title={ex.productName}>
+                {ex.productName}
+              </div>
+            )}
+            {location && (
+              <div className="text-[#3F3A30]">
+                <span className="text-[#6B6356]">on</span> {location}
+                {ex.imprintDimensions ? ` · ${ex.imprintDimensions}` : ""}
+              </div>
+            )}
+            {ex.inkColors && ex.inkColors.length > 0 && (
+              <div className="text-[#6B6356]">{ex.inkColors.join(", ")}</div>
+            )}
+            {raw.webViewLink && (
+              <a
+                href={raw.webViewLink}
+                target="_blank"
+                rel="noreferrer"
+                className="text-cg-teal hover:underline text-[11px] truncate block"
+                title={raw.filename ?? "Open in Drive"}
+              >
+                {raw.filename ? raw.filename : "Open in Drive"} ↗
+              </a>
+            )}
+          </div>
+        );
+      })}
+      {proofs.length > 3 && (
+        <div className="text-[11px] text-[#6B6356]">
+          + {proofs.length - 3} more
+        </div>
+      )}
+    </div>
   );
 }
 
