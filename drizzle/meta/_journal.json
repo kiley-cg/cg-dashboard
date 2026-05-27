@@ -92,6 +92,13 @@
       "when": 1779826090558,
       "tag": "0012_chief_devos",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779923528652,
+      "tag": "0013_faithful_firebird",
+      "breakpoints": true
     }
   ]
 }

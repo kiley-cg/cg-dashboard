@@ -88,13 +88,21 @@ const QTY_PATTERNS: RegExp[] = [
 ];
 
 const DECORATION_RX = /\bDecoration\s*[:\-]\s*([A-Z][A-Z\s]+?)(?:\n|$)/i;
+// Old template: "Imprint Colors ColorSplash" — the decoration appears
+// on the same line as the "Imprint Colors" label, no colon. Pull the
+// trailing token(s) as the decoration value (used as a fallback when
+// the new "Decoration :" pattern misses).
+const DECORATION_OLD_RX = /\bImprint\s+Colors?\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\s*$/m;
 const STITCHES_RX = /\bSTITCHES\s+([0-9,]+)\b/i;
 
-// Salesperson initials. Two layouts observed:
-//   - "PROOF 31549     KG" (embroidery/screen-print, space-separated)
-//   - "32665HLM" (promo, concatenated at end of text)
+// Salesperson initials. Three layouts:
+//   - "PROOF 31549     KG"   (new template, space-separated)
+//   - "32665HLM"             (new template, concatenated at end of text)
+//   - "ART # 29858\nH"       (OLD template — single letter on its own
+//                            line immediately after ART # NNNNN)
 const SALESPERSON_HEADER_RX = /\bPROOF\s+\d{4,6}\s+([A-Z]{2,3})\b/;
 const SALESPERSON_TRAILING_RX = /(\d{4,6})([A-Z]{2,3})\s*$/m;
+const SALESPERSON_OLD_RX = /\bART\s*#?\s*\d{4,6}\s*\n([A-Z])\s*\n/i;
 
 // "INK COLORS" header (allow singular "INK COLOR" + multiple spaces).
 // Color values are scanned line-by-line after the header (see
@@ -148,6 +156,13 @@ function extractLocations(text: string): {
       dimensions = m[2].replace(/\s+/g, " ").trim();
     }
   }
+  // Old-template fallback for dimensions: a bare "2.125\"w x 1.12\"h"
+  // line with no preceding location word. Old proofs don't surface a
+  // location name, so we just grab the dimensions when we see them.
+  if (!dimensions) {
+    const m = text.match(/^(\d*\.?\d+["”'][wh]\s*x\s*\d*\.?\d+\s*["”'][wh])/m);
+    if (m) dimensions = m[1].replace(/\s+/g, " ").trim();
+  }
   if (out.length > 0) return { locations: out, dimensions };
 
   // Fallback: bare uppercase garment header keywords.
@@ -192,6 +207,30 @@ function extractProductAndColor(
   text: string,
 ): { product: string | null; color: string | null } {
   const lines = text.split("\n").map((l) => l.trim());
+
+  // Old template: "Product\nImprint Size\n[product name]\n[dims]\n
+  // Imprint Colors X". Labels are bare (no colon) and there's no
+  // separate color label — product color isn't surfaced on old proofs.
+  // Detect this layout via the "Product / Imprint Size" pair.
+  const oldProductIdx = lines.findIndex((l) => /^Product\s*$/i.test(l));
+  if (oldProductIdx >= 0 && /^Imprint\s+Size\s*$/i.test(lines[oldProductIdx + 1] ?? "")) {
+    // Next non-empty line is the product name (often wrapped across 1-2 lines).
+    const after = lines.slice(oldProductIdx + 2);
+    const product: string[] = [];
+    for (const line of after) {
+      if (line.length === 0) continue;
+      // Stop at the dimensions line (next field in the value block).
+      if (/\d+(?:\.\d+)?["”'][wh]/.test(line)) break;
+      // Stop if we hit another label (defensive).
+      if (/^(?:Imprint|Decoration|Product|Color|Art)\b/i.test(line)) break;
+      product.push(line);
+      if (product.length >= 2) break;
+    }
+    const name = product.join(" ").trim();
+    return { product: name.length > 0 ? name : null, color: null };
+  }
+
+  // New template: "Product :\nColor(s) :\nproduct lines\ncolor line".
   const productIdx = lines.findIndex((l) => /^Product\s*:/i.test(l));
   const colorIdx = lines.findIndex((l) => /^Colors?\s*:/i.test(l));
   if (productIdx < 0 || colorIdx < 0) return { product: null, color: null };
@@ -236,7 +275,8 @@ export function extractProofSpec(text: string): ProofSpec {
   }
 
   const decorationMatch = text.match(DECORATION_RX);
-  const decorationRaw = decorationMatch ? decorationMatch[1] : null;
+  const decorationRaw =
+    decorationMatch?.[1] ?? text.match(DECORATION_OLD_RX)?.[1] ?? null;
 
   const stitchesMatch = text.match(STITCHES_RX);
   const stitchesRaw = stitchesMatch ? stitchesMatch[1] : null;
@@ -247,10 +287,12 @@ export function extractProofSpec(text: string): ProofSpec {
   }
 
   // Salesperson: try header layout first (space-separated), then
-  // trailing layout (concatenated at end of text).
+  // trailing layout (concatenated at end of text), then old template
+  // (single letter on the line after ART # NNNNN).
   const salespersonInitials =
     text.match(SALESPERSON_HEADER_RX)?.[1] ??
     text.match(SALESPERSON_TRAILING_RX)?.[2] ??
+    text.match(SALESPERSON_OLD_RX)?.[1] ??
     null;
 
   const inkColors = extractInkColors(text);

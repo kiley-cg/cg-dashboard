@@ -215,7 +215,11 @@ export function PoCard({
         {/* Identity row */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-bold text-base">{display}</span>
-          <IdChip label="Job" value={po.syncoreJobId} />
+          <IdChip
+            label="Job"
+            value={po.syncoreJobId}
+            href={`https://www.ateasesystems.net/Job/Details/${po.syncoreJobId}`}
+          />
           <IdChip
             label="PO"
             value={po.poNumber != null ? String(po.poNumber) : po.poId}
@@ -378,12 +382,36 @@ function ProofPanel({ proofs }: { proofs: JobVerificationRecord[] }) {
   );
 }
 
-function IdChip({ label, value }: { label: string; value: string }) {
-  return (
-    <span className="text-xs text-[#4A4336] bg-[#ECEFE9] border border-[#D6DCCF] rounded px-2 py-px tabular-nums">
+function IdChip({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value: string;
+  href?: string;
+}) {
+  const inner = (
+    <>
       {label} <b className="text-cg-teal font-extrabold text-[13px]">{value}</b>
-    </span>
+    </>
   );
+  const className =
+    "text-xs text-[#4A4336] bg-[#ECEFE9] border border-[#D6DCCF] rounded px-2 py-px tabular-nums";
+  if (href) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className={`${className} hover:bg-[#DCE3D6] hover:border-cg-teal transition-colors`}
+        title={`Open ${label} ${value} in Syncore`}
+      >
+        {inner}
+      </a>
+    );
+  }
+  return <span className={className}>{inner}</span>;
 }
 
 function StatusPill({ status }: { status: string }) {

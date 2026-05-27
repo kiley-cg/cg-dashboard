@@ -327,6 +327,24 @@ export const jobVerificationRecord = pgTable(
   }),
 );
 
+// Tracks progress of the slow-drip Drive proof backfill. One row per
+// Drive range folder (e.g. "28000-28999"). The hourly cron handles
+// last-30-days incrementals; this table powers a daily catch-up cron
+// that steps through historical ranges one chunk at a time.
+export const proofBackfillState = pgTable("proof_backfill_state", {
+  rangeName: text("range_name").primaryKey(),
+  folderId: text("folder_id").notNull(),
+  // Total Drive PDFs in this range. Null until the first sweep counts
+  // them; populated by the seeding step of the cron.
+  totalCount: integer("total_count"),
+  // How many files have been processed with parseSpec=true so far.
+  processedOffset: integer("processed_offset").notNull().default(0),
+  doneAt: timestamp("done_at", { mode: "date" }),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+
 // Inbound apparel-PO receiving state. One row per Syncore PO id (apparel
 // vendors only — SanMar, S&S, etc., not the in-house decoration POs).
 // "Received" here is dashboard-local: when set, the floor sees the PO
