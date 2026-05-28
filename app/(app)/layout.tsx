@@ -160,6 +160,11 @@ export default async function AppLayout({
                   { href: "/admin/users", label: "Users", show: canUsers },
                   { href: "/admin/roles", label: "Roles", show: canRoles },
                   { href: "/admin/crons", label: "Crons", show: canCrons },
+                  {
+                    href: "/admin/proof-backfill",
+                    label: "Proof backfill",
+                    show: canCrons,
+                  },
                   { href: "/admin/help", label: "Help docs", show: canHelp },
                 ]}
               />
