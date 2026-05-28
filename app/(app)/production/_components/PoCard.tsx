@@ -257,11 +257,6 @@ export function PoCard({
               <b>Stitches</b> {po.stitchCount.toLocaleString()}
             </span>
           )}
-          {po.supplierName && (
-            <span title={po.supplierName} className="text-[#6B6356]">
-              {po.supplierName}
-            </span>
-          )}
         </div>
 
         {/* Inbound apparel status — collapsed badge, expandable to add
