@@ -12,7 +12,6 @@ import {
 } from "@/lib/db/verifications";
 import { hasPermission } from "@/lib/rbac";
 import { JobSpecForm } from "./_components/JobSpecForm";
-import { ProofRecordsCard } from "./_components/ProofRecordsCard";
 import { pickConsolidationWarehouse } from "@/lib/vendors/warehouse-priority";
 import { matchVariant } from "@/lib/vendors/match";
 import { estimateFreight } from "@/lib/ups/freight";
@@ -80,11 +79,10 @@ export default async function JobPage({ params, searchParams }: Props) {
       permission: "verifications.record_spec",
     }),
   ]);
-  // The manual row is the editable "current" spec; proof rows come from
-  // the Drive sync (D2). Show proofs in a separate card so the manual
-  // spec stays the editable source-of-truth.
+  // The manual row is the editable "current" spec. Proof rows from the
+  // Drive sync (D2) live on /production tiles — not here, since this
+  // page is the inventory-check workflow.
   const manualSpec = jobSpecRecords.find((r) => r.source === "manual") ?? null;
-  const proofRecords = jobSpecRecords.filter((r) => r.source === "proof");
 
   let bundle;
   try {
@@ -250,10 +248,8 @@ export default async function JobPage({ params, searchParams }: Props) {
       </div>
 
       {/* Phase D1: per-job spec / approval record. Editable by users with
-          verifications.record_spec; everyone else sees a read-only view.
-          Drive proofs are surfaced separately below — kept distinct so the
-          manual row stays the editable source-of-truth. */}
-      <div className="mb-4">
+          verifications.record_spec; everyone else sees a read-only view. */}
+      <div className="mb-6">
         <JobSpecForm
           jobId={id}
           initial={
@@ -268,10 +264,6 @@ export default async function JobPage({ params, searchParams }: Props) {
           }
           canEdit={canEditSpec}
         />
-      </div>
-
-      <div className="mb-6">
-        <ProofRecordsCard proofs={proofRecords} />
       </div>
 
       {(() => {
