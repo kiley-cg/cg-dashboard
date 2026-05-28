@@ -234,14 +234,20 @@ export function PoCard({
           <StatusPill status={po.status} />
         </div>
 
-        {/* Meta row */}
-        <div className="flex flex-wrap gap-4 text-[12.5px] text-[#5A5346] mt-1.5">
-          <span>
-            <b>Qty</b> {po.totalQuantity ?? "—"}
-          </span>
+        {/* Meta row — Due is the actionable deadline so it gets a
+            stronger pill; Qty + Stitches are secondary context. */}
+        <div className="flex flex-wrap items-center gap-3 mt-1.5 text-[12.5px] text-[#5A5346]">
           {po.inHandDate && (
-            <span>
-              <b>Due</b> {po.inHandDate.slice(5)}
+            <span
+              className="inline-flex items-baseline gap-1 rounded-md px-2 py-0.5 bg-white border border-[#D6DCCF] tabular-nums"
+              title="In-hand date"
+            >
+              <span className="text-[10px] uppercase tracking-wider text-[#6B6356] font-semibold">
+                Due
+              </span>
+              <span className="font-bold text-[#1C2B27]">
+                {po.inHandDate.slice(5)}
+              </span>
             </span>
           )}
           {conflict && lastArrival && (
@@ -252,11 +258,21 @@ export function PoCard({
               ⚠ apparel late ({lastArrival.slice(5)})
             </span>
           )}
-          {department === "embroidery" && po.stitchCount != null && (
-            <span>
-              <b>Stitches</b> {po.stitchCount.toLocaleString()}
-            </span>
-          )}
+          <span className="text-[#6B6356]">
+            <b className="font-semibold text-[#3F3A30]">
+              {po.totalQuantity ?? "—"}
+            </b>{" "}
+            qty
+            {department === "embroidery" && po.stitchCount != null && (
+              <>
+                {" · "}
+                <b className="font-semibold text-[#3F3A30] tabular-nums">
+                  {po.stitchCount.toLocaleString()}
+                </b>{" "}
+                stitches
+              </>
+            )}
+          </span>
         </div>
 
         {/* Inbound apparel status — collapsed badge, expandable to add
