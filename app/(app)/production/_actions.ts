@@ -300,7 +300,13 @@ export async function closeSyncorePo(
       error: "Mark the PO Done before closing it in Syncore.",
     };
   }
-  if (state[0].syncoreClosedAt) {
+  // Allow re-close if formData carries ?force=1 — used when Syncore
+  // silently no-op'd a previous attempt and the dashboard's
+  // syncoreClosedAt stamp is now out of sync with Syncore's actual
+  // status. Without this the action short-circuits and there's no UI
+  // way to retry without manual SQL.
+  const force = formData.get("force") === "1";
+  if (state[0].syncoreClosedAt && !force) {
     revalidatePath("/production");
     return { ok: true };
   }
@@ -309,9 +315,14 @@ export async function closeSyncorePo(
     // Tag the close with WHO closed it. The signed-in user's name is
     // the natural "invoice number" for an in-house PO; Syncore stamps
     // the dates server-side on the auto-transition.
-    await postPurchaseOrderManually(jobId, poId, {
+    const responseBody = await postPurchaseOrderManually(jobId, poId, {
       invoiceNumber: userName ?? "In-house production",
     });
+    // eslint-disable-next-line no-console
+    console.log(
+      `[closeSyncorePo] PO ${poId} (job ${jobId}) — Syncore response:`,
+      JSON.stringify(responseBody),
+    );
   } catch (err) {
     if (err instanceof SyncoreError || err instanceof WebUiError) {
       const detail =

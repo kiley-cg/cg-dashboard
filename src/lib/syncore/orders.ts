@@ -224,8 +224,13 @@ export async function postPurchaseOrderManually(
   opts: {
     invoiceNumber?: string;
   } = {},
-): Promise<void> {
-  await webuiFetch(
+): Promise<unknown> {
+  // Capture the response body so closeSyncorePo can log it. Several
+  // observed cases of /supplier-invoices returning 200 but the PO
+  // status staying Open/Approved in Syncore — without the body it's
+  // impossible to tell whether Syncore queued a job, rejected silently,
+  // or actually flipped the status.
+  const result = await webuiFetch(
     `/api/jobs/${encodeURIComponent(String(jobId))}` +
       `/purchaseorders/${encodeURIComponent(String(poId))}` +
       `/supplier-invoices`,
@@ -236,6 +241,7 @@ export async function postPurchaseOrderManually(
       },
     },
   );
+  return result;
 }
 
 /**
