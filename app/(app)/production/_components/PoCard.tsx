@@ -223,6 +223,7 @@ export function PoCard({
           <IdChip
             label="PO"
             value={po.poNumber != null ? String(po.poNumber) : po.poId}
+            href={`https://www.ateasesystems.net/PurchaseOrder/Details/${po.poId}?jobId=${po.syncoreJobId}`}
           />
           <span
             className="text-[10px] font-bold tracking-wider border rounded px-1.5 py-px"
