@@ -65,6 +65,10 @@ export function FloorStatusControl({
         const result = await closeSyncorePo(fd);
         if (!result.ok) {
           alert(`Couldn't close PO in Syncore.\n\n${result.error}`);
+        } else if (result.debug) {
+          alert(
+            `DIAGNOSTIC — Syncore response body for the close:\n\n${result.debug}`,
+          );
         }
       } catch (err) {
         // Fallback for thrown exceptions (network, etc). Production builds

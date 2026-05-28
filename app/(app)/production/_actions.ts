@@ -18,7 +18,7 @@ import {
 } from "@/lib/db/receiving";
 
 export type ActionResult =
-  | { ok: true }
+  | { ok: true; syncedToJobLog?: boolean; syncError?: string; debug?: string }
   | { ok: false; error: string; status?: number };
 
 const FLOOR_STATUSES = ["stopped", "in_progress", "done"] as const;
@@ -311,11 +311,12 @@ export async function closeSyncorePo(
     return { ok: true };
   }
 
+  let responseBody: unknown;
   try {
     // Tag the close with WHO closed it. The signed-in user's name is
     // the natural "invoice number" for an in-house PO; Syncore stamps
     // the dates server-side on the auto-transition.
-    const responseBody = await postPurchaseOrderManually(jobId, poId, {
+    responseBody = await postPurchaseOrderManually(jobId, poId, {
       invoiceNumber: userName ?? "In-house production",
     });
     // eslint-disable-next-line no-console
@@ -377,7 +378,13 @@ export async function closeSyncorePo(
   }
 
   revalidatePath("/production");
-  return { ok: true };
+  // DIAGNOSTIC: surface the Syncore response body to the client so we
+  // can see why 32516-2 reported 2xx but Syncore didn't flip status.
+  // Remove the `debug` field once root cause is fixed.
+  return {
+    ok: true,
+    debug: JSON.stringify(responseBody, null, 2),
+  };
 }
 
 // ---------------------------------------------------------------------------
