@@ -76,37 +76,44 @@ export function InboundSiblingsPanel({
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="inline-flex items-center gap-1.5 font-semibold hover:underline"
-        style={{ color: allClosed ? "#3A8C5F" : "#8A5A2B" }}
+        className="inline-flex items-center gap-2 hover:underline w-full text-left"
         aria-expanded={expanded}
       >
         <span
-          className="inline-block w-2 h-2 rounded-full"
+          className="inline-block w-2 h-2 rounded-full shrink-0"
           style={{ background: allClosed ? "#3A8C5F" : "#E0A800" }}
         />
+        <span
+          className="font-semibold uppercase tracking-wider text-[10.5px]"
+          style={{ color: allClosed ? "#3A8C5F" : "#8A5A2B" }}
+        >
+          Apparel
+        </span>
         {allClosed ? (
-          `All ${total} apparel PO${total === 1 ? "" : "s"} delivered`
+          <span style={{ color: "#3A8C5F" }} className="font-semibold">
+            all {total} delivered
+          </span>
         ) : (
-          <>
-            Waiting on {open} of {total} apparel PO{total === 1 ? "" : "s"}
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            <span style={{ color: "#8A5A2B" }} className="font-semibold tabular-nums">
+              {total - open}/{total} in
+            </span>
             {lastArrival && (
-              <>
-                {" · "}
-                <span className="font-normal text-[#5A5346]">last</span>{" "}
-                <span>{lastArrival.slice(5)}</span>
-              </>
+              <span className="text-[#5A5346]">
+                <span className="text-[#8B8579]">arrives</span>{" "}
+                <span className="font-semibold text-[#3F3A30] tabular-nums">
+                  {lastArrival.slice(5)}
+                </span>
+              </span>
             )}
             {inboundTrackingCount > 0 && (
-              <>
-                {" · "}
-                <span className="font-normal text-[#5A5346]">
-                  {inboundTrackingCount} tracking
-                </span>
-              </>
+              <span className="text-[#5A5346] tabular-nums">
+                {inboundTrackingCount} tracking
+              </span>
             )}
-          </>
+          </span>
         )}
-        <span className="text-[10px] text-[#9B9588] ml-1" aria-hidden>
+        <span className="text-[10px] text-[#9B9588] ml-auto shrink-0" aria-hidden>
           {expanded ? "▴" : "▾"}
         </span>
       </button>
