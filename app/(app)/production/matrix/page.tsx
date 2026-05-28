@@ -22,6 +22,10 @@ import {
 } from "@/lib/db/production-po";
 import { findProofsByJobIds } from "@/lib/db/verifications";
 import { departmentForSupplier } from "@/lib/syncore/production";
+import {
+  estimateEmbroidery,
+  formatMinutes,
+} from "@/lib/production/embroidery-estimate";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -64,6 +68,7 @@ interface MatrixGroup {
   location: string;
   rows: MatrixRow[];
   totalQty: number;
+  totalEstMinutes: number; // sum of per-row embroidery estimates; 0 for non-embroidery
 }
 
 export default async function ProductionMatrixPage() {
@@ -131,18 +136,32 @@ export default async function ProductionMatrixPage() {
         stitches: ex.stitches ?? null,
         scheduledDate: v.state?.scheduledDate ?? null,
       };
+      // Embroidery estimate per row uses the PO's stitchCount × qty.
+      // For non-embroidery decoration types, est is 0 (we haven't
+      // built formulas for screen print / pad print yet).
+      const dept = departmentForSupplier(v.po.supplierName);
+      const est =
+        dept === "embroidery"
+          ? estimateEmbroidery({
+              stitchesPerPiece: v.po.stitchCount,
+              pieces: v.po.totalQuantity,
+            })
+          : null;
+      const rowEstMinutes = est?.totalMinutes ?? 0;
       for (const location of locations) {
         const key = `${decoration}|||${location}`;
         const g = groups.get(key);
         if (g) {
           g.rows.push(row);
           g.totalQty += v.po.totalQuantity ?? 0;
+          g.totalEstMinutes += rowEstMinutes;
         } else {
           groups.set(key, {
             decoration,
             location,
             rows: [row],
             totalQty: v.po.totalQuantity ?? 0,
+            totalEstMinutes: rowEstMinutes,
           });
         }
       }
@@ -157,6 +176,10 @@ export default async function ProductionMatrixPage() {
   const totalGroups = sortedGroups.length;
   const totalEntries = sortedGroups.reduce((s, g) => s + g.rows.length, 0);
   const totalQty = sortedGroups.reduce((s, g) => s + g.totalQty, 0);
+  const totalEstMinutes = sortedGroups.reduce(
+    (s, g) => s + g.totalEstMinutes,
+    0,
+  );
 
   return (
     <section className="max-w-6xl mx-auto px-6 py-8 space-y-6">
@@ -182,13 +205,20 @@ export default async function ProductionMatrixPage() {
         </Link>
       </header>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <Stat label="Groups" value={String(totalGroups)} />
         <Stat label="Imprint entries" value={String(totalEntries)} />
         <Stat
           label="Total qty"
           value={totalQty.toLocaleString()}
           sub="across all entries"
+        />
+        <Stat
+          label="Embroidery time"
+          value={
+            totalEstMinutes > 0 ? formatMinutes(totalEstMinutes) : "—"
+          }
+          sub="800 spm × 12 heads"
         />
         <Stat
           label="POs without proof"
@@ -239,6 +269,14 @@ function GroupSection({ group }: { group: MatrixGroup }) {
             </b>{" "}
             qty
           </span>
+          {group.totalEstMinutes > 0 && (
+            <span title="Embroidery time estimate at 800 spm × 12 heads + 10m setup per design">
+              <b className="text-cg-teal tabular-nums">
+                {formatMinutes(group.totalEstMinutes)}
+              </b>{" "}
+              est
+            </span>
+          )}
         </div>
       </header>
       <table className="w-full text-sm">
@@ -248,6 +286,7 @@ function GroupSection({ group }: { group: MatrixGroup }) {
             <th className="px-3 py-2">Customer</th>
             <th className="px-3 py-2">Product · color</th>
             <th className="px-3 py-2 text-right w-16">Qty</th>
+            <th className="px-3 py-2 w-20">Est</th>
             <th className="px-3 py-2 w-32">Size · ink</th>
             <th className="px-3 py-2 w-20">Due</th>
             <th className="px-3 py-2 w-20">Sales</th>
@@ -309,6 +348,26 @@ function GroupSection({ group }: { group: MatrixGroup }) {
                 </td>
                 <td className="px-3 py-2.5 text-right tabular-nums font-medium">
                   {po.totalQuantity?.toLocaleString() ?? "—"}
+                </td>
+                <td className="px-3 py-2.5 text-xs tabular-nums">
+                  {(() => {
+                    if (dept !== "embroidery") {
+                      return <span className="text-cg-n-400">—</span>;
+                    }
+                    const est = estimateEmbroidery({
+                      stitchesPerPiece: po.stitchCount,
+                      pieces: po.totalQuantity,
+                    });
+                    if (!est) return <span className="text-cg-n-400">—</span>;
+                    return (
+                      <span
+                        className="text-cg-teal font-medium"
+                        title={`run ${Math.round(est.runMinutes)}m + setup ${Math.round(est.setupMinutes)}m`}
+                      >
+                        {est.display}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="px-3 py-2.5 text-xs text-cg-n-600">
                   {r.imprintDimensions && <div>{r.imprintDimensions}</div>}

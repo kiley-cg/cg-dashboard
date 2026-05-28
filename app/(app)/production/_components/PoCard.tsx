@@ -14,6 +14,7 @@ import type {
 import type { TrackingEntry } from "@/lib/db/receiving";
 import type { JobVerificationRecord } from "@/lib/db/verifications";
 import type { Department } from "@/lib/syncore/production";
+import { estimateEmbroidery } from "@/lib/production/embroidery-estimate";
 import { ScheduleControl } from "./ScheduleControl";
 import { FloorStatusControl } from "./FloorStatusControl";
 import { NotesEditor } from "./NotesEditor";
@@ -274,6 +275,27 @@ export function PoCard({
               </>
             )}
           </span>
+          {department === "embroidery" &&
+            (() => {
+              const est = estimateEmbroidery({
+                stitchesPerPiece: po.stitchCount,
+                pieces: po.totalQuantity,
+              });
+              if (!est) return null;
+              return (
+                <span
+                  className="inline-flex items-baseline gap-1 rounded-md px-2 py-0.5 bg-cg-teal/10 border border-cg-teal/30 tabular-nums"
+                  title={`Run ${Math.round(est.runMinutes)}m + setup ${Math.round(est.setupMinutes)}m · 800 spm × 12 heads`}
+                >
+                  <span className="text-[10px] uppercase tracking-wider text-cg-teal font-semibold">
+                    Est
+                  </span>
+                  <span className="font-bold text-cg-teal">
+                    {est.display}
+                  </span>
+                </span>
+              );
+            })()}
         </div>
 
         {/* Inbound apparel status — collapsed badge, expandable to add
