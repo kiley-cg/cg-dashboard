@@ -18,7 +18,7 @@ import {
 } from "@/lib/db/receiving";
 
 export type ActionResult =
-  | { ok: true; syncedToJobLog?: boolean; syncError?: string; debug?: string }
+  | { ok: true; syncedToJobLog?: boolean; syncError?: string }
   | { ok: false; error: string; status?: number };
 
 const FLOOR_STATUSES = ["stopped", "in_progress", "done"] as const;
@@ -276,10 +276,18 @@ export async function closeSyncorePo(
     return { ok: false, error: "Missing poId" };
   }
 
-  // Look up the PO's parent job id — the v1 web UI close endpoint needs
-  // both ids in the path.
+  // Look up the PO's parent job id + poNumber. Both are needed:
+  //   - jobId: the v1 web UI close endpoint requires it in the path.
+  //   - poNumber: makes the supplierInvoiceNumber unique per PO.
+  //     Syncore silently no-ops the close with
+  //     isSupplierInvoiceNumberDuplicated=true when the invoice number
+  //     matches an existing one — using just the user's name across
+  //     every PO triggers that after the first close.
   const mirror = await db
-    .select({ jobId: schema.productionPoMirror.syncoreJobId })
+    .select({
+      jobId: schema.productionPoMirror.syncoreJobId,
+      poNumber: schema.productionPoMirror.poNumber,
+    })
     .from(schema.productionPoMirror)
     .where(eq(schema.productionPoMirror.poId, poId))
     .limit(1);
@@ -287,6 +295,8 @@ export async function closeSyncorePo(
     return { ok: false, error: `PO ${poId} is not in the local mirror` };
   }
   const jobId = mirror[0].jobId;
+  const poLabel =
+    mirror[0].poNumber != null ? `${jobId}-${mirror[0].poNumber}` : poId;
 
   // Guardrails: only close from done, and only once.
   const state = await db
@@ -312,18 +322,37 @@ export async function closeSyncorePo(
   }
 
   let responseBody: unknown;
+  // Compose a per-PO unique supplier-invoice-number. The user's name
+  // alone collides on the second close — see isSupplierInvoiceNumberDuplicated
+  // trap above. "{userName} ({jobId}-{poNumber})" both audits who closed
+  // it AND stays unique per PO.
+  const invoiceNumber = `${userName ?? "Production"} (${poLabel})`;
+
   try {
-    // Tag the close with WHO closed it. The signed-in user's name is
-    // the natural "invoice number" for an in-house PO; Syncore stamps
-    // the dates server-side on the auto-transition.
     responseBody = await postPurchaseOrderManually(jobId, poId, {
-      invoiceNumber: userName ?? "In-house production",
+      invoiceNumber,
     });
     // eslint-disable-next-line no-console
     console.log(
       `[closeSyncorePo] PO ${poId} (job ${jobId}) — Syncore response:`,
       JSON.stringify(responseBody),
     );
+    // Syncore reports a 2xx even when it rejects the close due to a
+    // duplicate supplierInvoiceNumber. Catch that explicitly so we
+    // don't silently mark the PO closed locally.
+    if (
+      typeof responseBody === "object" &&
+      responseBody !== null &&
+      (responseBody as { isSupplierInvoiceNumberDuplicated?: boolean })
+        .isSupplierInvoiceNumberDuplicated === true
+    ) {
+      return {
+        ok: false,
+        error:
+          `Syncore rejected the close: invoice number "${invoiceNumber}" already exists. ` +
+          `This usually means an earlier close attempt already used it — try again or contact support.`,
+      };
+    }
   } catch (err) {
     if (err instanceof SyncoreError || err instanceof WebUiError) {
       const detail =
@@ -378,13 +407,7 @@ export async function closeSyncorePo(
   }
 
   revalidatePath("/production");
-  // DIAGNOSTIC: surface the Syncore response body to the client so we
-  // can see why 32516-2 reported 2xx but Syncore didn't flip status.
-  // Remove the `debug` field once root cause is fixed.
-  return {
-    ok: true,
-    debug: JSON.stringify(responseBody, null, 2),
-  };
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
