@@ -246,6 +246,12 @@ export default async function ProductionPage({ searchParams }: PageProps) {
         </div>
         <div className="flex items-center gap-3">
           <Link
+            href="/production/matrix"
+            className="text-[13px] font-semibold text-cg-teal hover:underline"
+          >
+            Matrix view
+          </Link>
+          <Link
             href="/production/notes"
             className="text-[13px] font-semibold text-cg-teal hover:underline"
           >
