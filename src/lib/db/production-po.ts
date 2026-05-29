@@ -5,7 +5,7 @@
 // The schedule-state table (po_schedule_state) holds the dashboard-owned
 // scheduling/floor status that lives outside Syncore.
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { db, schema } from "./client";
 import type { TrackingEntry } from "./receiving";
 import {
@@ -263,8 +263,8 @@ export async function listRecentlyClosedDecorationPos(opts?: {
     .from(schema.poScheduleState)
     .where(
       and(
-        sql`${schema.poScheduleState.syncoreClosedAt} IS NOT NULL`,
-        sql`${schema.poScheduleState.syncoreClosedAt} >= ${since}`,
+        isNotNull(schema.poScheduleState.syncoreClosedAt),
+        gte(schema.poScheduleState.syncoreClosedAt, since),
       ),
     )
     .orderBy(desc(schema.poScheduleState.syncoreClosedAt));
