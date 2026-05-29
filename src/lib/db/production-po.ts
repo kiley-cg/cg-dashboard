@@ -135,6 +135,12 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
   // Approved → Posted Manually → Posted @ease A/P → Paid. We treat
   // anything other than the terminal "Posted Manually" / "Paid" as still
   // "in flight" so the floor can see jobs they haven't finished.
+  //
+  // Also exclude POs that already have syncoreClosedAt stamped — the
+  // dashboard considers those done the moment Close in Syncore succeeds,
+  // even though the hourly mirror cron may not yet have picked up the
+  // Posted-Manually status from Syncore. Otherwise a freshly-closed PO
+  // would linger on the schedule for up to an hour.
   const decorationPos = await db
     .select()
     .from(schema.productionPoMirror)
@@ -142,6 +148,7 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
       and(
         eq(schema.productionPoMirror.supplierClass, IN_HOUSE_SUPPLIER_CLASS),
         sql`${schema.productionPoMirror.status} NOT IN ('Posted Manually', 'Posted @ease A/P', 'Paid')`,
+        sql`${schema.productionPoMirror.poId} NOT IN (SELECT po_id FROM po_schedule_state WHERE syncore_closed_at IS NOT NULL)`,
       ),
     )
     .orderBy(desc(schema.productionPoMirror.mirroredAt));
@@ -230,6 +237,57 @@ export async function listOpenDecorationPos(): Promise<DecorationPoView[]> {
       trackingBySibling,
     };
   });
+}
+
+export interface CompletedPoView {
+  po: MirroredPo;
+  state: PoScheduleState;
+}
+
+/**
+ * Decoration POs the dashboard has marked closed in Syncore. Read by the
+ * /production "Completed" tab so the floor can see what shipped recently
+ * — and undo a mistaken close if needed.
+ *
+ * Bounded by `sinceDays` so the tab doesn't grow without bound. Default
+ * 30 days mirrors how far back Kristen typically looks for a "did I
+ * already do this customer this month" check.
+ */
+export async function listRecentlyClosedDecorationPos(opts?: {
+  sinceDays?: number;
+}): Promise<CompletedPoView[]> {
+  const sinceDays = opts?.sinceDays ?? 30;
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
+  const states = await db
+    .select()
+    .from(schema.poScheduleState)
+    .where(
+      and(
+        sql`${schema.poScheduleState.syncoreClosedAt} IS NOT NULL`,
+        sql`${schema.poScheduleState.syncoreClosedAt} >= ${since}`,
+      ),
+    )
+    .orderBy(desc(schema.poScheduleState.syncoreClosedAt));
+  if (states.length === 0) return [];
+  const poIds = states.map((s) => s.poId);
+  const mirrors = await db
+    .select()
+    .from(schema.productionPoMirror)
+    .where(
+      and(
+        inArray(schema.productionPoMirror.poId, poIds),
+        eq(schema.productionPoMirror.supplierClass, IN_HOUSE_SUPPLIER_CLASS),
+      ),
+    );
+  const mirrorByPoId = new Map(mirrors.map((m) => [m.poId, m]));
+  // Filter out states whose mirror row no longer exists (PO deleted /
+  // archived in Syncore) — they don't have anything to render.
+  return states
+    .map((s) => {
+      const po = mirrorByPoId.get(s.poId);
+      return po ? { po, state: s } : null;
+    })
+    .filter((v): v is CompletedPoView => v !== null);
 }
 
 /**

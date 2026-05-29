@@ -36,6 +36,10 @@
     {
       "path": "/api/cron/backfill-proofs",
       "schedule": "30 */4 * * *"
+    },
+    {
+      "path": "/api/cron/rollover-overdue-pos",
+      "schedule": "0 13 * * 1-5"
     }
   ]
 }
