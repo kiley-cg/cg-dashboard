@@ -194,54 +194,90 @@ export async function getPurchaseOrder(
 /**
  * Drive an in-house decoration PO to "Posted Manually" via the v1 web UI.
  *
- * Syncore's v2 REST API does not actually support this transition for
- * in-house decoration POs:
- *   - PATCH /v2/.../status/postedmanually returns 404 for every spelling
- *     we tried (probe #46).
- *   - PUT /v2/.../purchaseorders/{poId} with status="Posted Manually" or
- *     status="Approved" plus the full body either silently no-ops or
- *     gets stuck on docs-vs-validation catch-22s about approval_date /
- *     posting_date (#47-#53).
+ * Captured from a real HAR of Kiley clicking Approve in Syncore's web UI
+ * (May 2026, job 32432 / PO 68126). The Approve button fires TWO calls:
  *
- * What the Syncore web UI actually does — captured from devtools when
- * Kiley clicked Approve on an Open PO:
+ *   1. POST /api/jobs/{jobId}/purchaseorders/{poId}/supplier-invoices
+ *      { supplierInvoiceNumber }
+ *      — Creates the supplier-invoice record AND returns
+ *      isSupplierInvoiceNumberDuplicated. In the UI, true triggers a
+ *      "Keep Duplicate #" confirmation dialog; the user can override.
+ *      Does NOT itself transition the PO status.
  *
- *   POST https://www.ateasesystems.net/api/jobs/{jobId}/purchaseorders/{poId}/supplier-invoices
- *   { "supplierInvoiceNumber": "Kiley Gustafson" }
+ *   2. PATCH /api/jobs/{jobId}/purchaseorders/{poId}
+ *      { field: 21, value: JSON.stringify({
+ *          supplierInvoiceDate, supplierInvoiceNumber,
+ *          approvalComments: "", statusId: 7,
+ *        }) }
+ *      — statusId 7 = Posted Manually. THIS is the call that actually
+ *      transitions the PO.
  *
- * Cookie session auth (the same v1 session we already use for
- * follow-ups). The v1 server handles the whole Approve → Posted
- * Manually auto-transition internally on that one POST. No dates —
- * Syncore stamps those itself.
+ * The v2 REST PATCH /status/postedmanually returns 404 in our tenant
+ * (probe #46) and the v2 PUT path is stuck in approval_date /
+ * posting_date catch-22s (#47-#53). The v1 field:21 PATCH sidesteps
+ * all of it because that's the path the web UI itself uses.
  *
- * For in-house decoration the signed-in user's name stands in for the
- * (non-existent) supplier invoice number, so AP reports show the audit
- * footprint of who closed what.
+ * Prior to this two-call implementation, we were only doing call #1.
+ * Every "close" we performed silently created an invoice record
+ * without ever flipping the PO status — which is why 5 POs we
+ * "closed" through the dashboard remained Open in Syncore. PRs
+ * #169-172 chased the dup flag thinking that was the blocker; it
+ * wasn't. The PO mirror cron now picks up the real status because
+ * field:21 is the canonical transition.
+ *
+ * For in-house decoration the signed-in user's name (suffixed with the
+ * job/PO label for uniqueness) stands in for the (non-existent)
+ * supplier invoice number, so AP reports show who closed what.
+ *
+ * Returns the response body of the field:21 PATCH (the updated PO).
  */
 export async function postPurchaseOrderManually(
   jobId: string | number,
   poId: string | number,
   opts: {
     invoiceNumber?: string;
+    invoiceDate?: string; // YYYY-MM-DD
   } = {},
 ): Promise<unknown> {
-  // Capture the response body so closeSyncorePo can log it. Several
-  // observed cases of /supplier-invoices returning 200 but the PO
-  // status staying Open/Approved in Syncore — without the body it's
-  // impossible to tell whether Syncore queued a job, rejected silently,
-  // or actually flipped the status.
-  const result = await webuiFetch(
+  const invoiceNumber = opts.invoiceNumber ?? "In-house production";
+  const invoiceDate =
+    opts.invoiceDate ??
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Los_Angeles",
+    }).format(new Date());
+
+  const poPath =
     `/api/jobs/${encodeURIComponent(String(jobId))}` +
-      `/purchaseorders/${encodeURIComponent(String(poId))}` +
-      `/supplier-invoices`,
-    {
+    `/purchaseorders/${encodeURIComponent(String(poId))}`;
+
+  // Call 1: create the supplier-invoice record (mirrors what the UI's
+  // Approve flow does pre-PATCH). We don't act on the duplicate flag —
+  // unlike the UI we have no human to prompt, and the field:21 PATCH
+  // below proceeds regardless (the UI's "Keep Duplicate #" override
+  // does the same). Wrapped in try so a transient AP-side hiccup
+  // doesn't block the actual status transition.
+  try {
+    await webuiFetch(`${poPath}/supplier-invoices`, {
       method: "POST",
-      body: {
-        supplierInvoiceNumber: opts.invoiceNumber ?? "In-house production",
-      },
-    },
-  );
-  return result;
+      body: { supplierInvoiceNumber: invoiceNumber },
+    });
+  } catch {
+    // Best-effort. The status transition below is what matters.
+  }
+
+  // Call 2: the actual approve/post. field 21 is Syncore's "approve"
+  // compound field — its value is a JSON-encoded string with all the
+  // approval fields. statusId 7 = Posted Manually.
+  const approvalPayload = JSON.stringify({
+    supplierInvoiceDate: invoiceDate,
+    supplierInvoiceNumber: invoiceNumber,
+    approvalComments: "",
+    statusId: 7,
+  });
+  return await webuiFetch(poPath, {
+    method: "PATCH",
+    body: { field: 21, value: approvalPayload },
+  });
 }
 
 /**
