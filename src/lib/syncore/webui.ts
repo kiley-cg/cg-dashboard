@@ -234,7 +234,7 @@ function appendParams(
 }
 
 export interface WebUiFetchInit {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PATCH";
   searchParams?: WebUiSearchParams;
   // Anything passed here is appended as data[key]=value (PHP/.NET-style).
   bracketed?: WebUiSearchParams;

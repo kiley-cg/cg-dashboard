@@ -321,38 +321,13 @@ export async function closeSyncorePo(
     return { ok: true };
   }
 
-  let responseBody: unknown;
-  // Compose a per-PO unique supplier-invoice-number. The user's name
-  // alone collides on the second close — see isSupplierInvoiceNumberDuplicated
-  // trap above. "{userName} ({jobId}-{poNumber})" both audits who closed
-  // it AND stays unique per PO.
+  // Compose a per-PO unique supplier-invoice-number. AP-side reports
+  // surface duplicates as a soft warning; making it unique-per-PO keeps
+  // those clean and also audits who closed each one.
   const invoiceNumber = `${userName ?? "Production"} (${poLabel})`;
 
   try {
-    responseBody = await postPurchaseOrderManually(jobId, poId, {
-      invoiceNumber,
-    });
-    // eslint-disable-next-line no-console
-    console.log(
-      `[closeSyncorePo] PO ${poId} (job ${jobId}) — Syncore response:`,
-      JSON.stringify(responseBody),
-    );
-    // Syncore reports a 2xx even when it rejects the close due to a
-    // duplicate supplierInvoiceNumber. Catch that explicitly so we
-    // don't silently mark the PO closed locally.
-    if (
-      typeof responseBody === "object" &&
-      responseBody !== null &&
-      (responseBody as { isSupplierInvoiceNumberDuplicated?: boolean })
-        .isSupplierInvoiceNumberDuplicated === true
-    ) {
-      return {
-        ok: false,
-        error:
-          `Syncore rejected the close: invoice number "${invoiceNumber}" already exists. ` +
-          `This usually means an earlier close attempt already used it — try again or contact support.`,
-      };
-    }
+    await postPurchaseOrderManually(jobId, poId, { invoiceNumber });
   } catch (err) {
     if (err instanceof SyncoreError || err instanceof WebUiError) {
       const detail =
