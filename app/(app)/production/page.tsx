@@ -27,6 +27,7 @@ import { HuddleSection } from "./_components/HuddleSection";
 import { NotificationToggle } from "./_components/NotificationToggle";
 import { WeekTabs } from "./_components/WeekTabs";
 import { InboundTab } from "./_components/InboundTab";
+import { CompletedTab } from "./_components/CompletedTab";
 import { SelectionProvider } from "./_components/SelectionProvider";
 import { BulkScheduleBar } from "./_components/BulkScheduleBar";
 import { FilterProvider } from "./_components/FilterProvider";
@@ -41,7 +42,7 @@ export const metadata = {
   title: "CG Production · Color Graphics",
 };
 
-type TabKey = "schedule" | "inbound";
+type TabKey = "schedule" | "inbound" | "completed";
 
 interface PageProps {
   searchParams: Promise<{
@@ -88,7 +89,12 @@ export default async function ProductionPage({ searchParams }: PageProps) {
 
   const today = pacificIsoDate();
   const params = await searchParams;
-  const activeTab: TabKey = params.tab === "inbound" ? "inbound" : "schedule";
+  const activeTab: TabKey =
+    params.tab === "inbound"
+      ? "inbound"
+      : params.tab === "completed"
+        ? "completed"
+        : "schedule";
   const view: "day" | "week" = params.view === "week" ? "week" : "day";
 
   // Week anchor (Monday). `?week=YYYY-MM-DD` overrides; default = this week.
@@ -276,10 +282,17 @@ export default async function ProductionPage({ searchParams }: PageProps) {
           label="Inbound"
           active={activeTab === "inbound"}
         />
+        <TopTab
+          href="/production?tab=completed"
+          label="Completed"
+          active={activeTab === "completed"}
+        />
       </div>
 
       {activeTab === "inbound" ? (
         <InboundTab />
+      ) : activeTab === "completed" ? (
+        <CompletedTab />
       ) : (
         <>
           <div className="px-8 pt-4 flex flex-wrap items-end gap-3">
